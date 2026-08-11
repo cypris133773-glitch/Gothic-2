@@ -13,6 +13,10 @@ import { Clock, MINUTES_PER_DAY, GAME_MINUTES_PER_SECOND, sunDirection, keyLight
 import { makeRng, hash } from '../src/core/rng.js';
 import * as m from '../src/core/math.js';
 import { on, emit, off, listenerCount, clearAll } from '../src/core/events.js';
+import { createTerrain } from '../src/world/terrain.js';
+import { createWorld } from '../src/world/world.js';
+import { idleIntent } from '../src/core/input.js';
+import { RUN_SPEED } from '../src/game/player.js';
 
 let passed = 0;
 const failures = [];
@@ -294,6 +298,168 @@ check('a handler that unsubscribes itself does not skip its neighbour', () => {
   eq(seen.join(','), 'first,second', 'both handlers ran');
   eq(listenerCount('tick'), 1, 'the first one is gone');
   clearAll();
+});
+
+
+// --- terrain, movement and camera --------------------------------------------
+
+check('the terrain is identical for the same seed and different for another', () => {
+  const a = createTerrain(4), b = createTerrain(4), c = createTerrain(5);
+  let differs = 0;
+  for (let i = 0; i < 200; i++) {
+    const x = i * 1.7 - 100, z = i * -2.3 + 40;
+    eq(a.heightAt(x, z), b.heightAt(x, z), `same seed at ${x},${z}`);
+    if (Math.abs(a.heightAt(x, z) - c.heightAt(x, z)) > 0.01) differs++;
+  }
+  assert(differs > 150, `seeds 4 and 5 produced the same landscape at ${200 - differs} of 200 points`);
+});
+
+check('the ground is continuous — no cliffs between adjacent samples', () => {
+  const t = createTerrain(2);
+  let worst = 0;
+  for (let x = -100; x <= 100; x += 3.1) {
+    for (let z = -100; z <= 100; z += 7.3) {
+      worst = Math.max(worst, Math.abs(t.heightAt(x, z) - t.heightAt(x + 0.5, z)));
+    }
+  }
+  // Half a metre sideways must never be more than two metres down, or the
+  // collision, the camera and the navmesh all disagree about where the floor is.
+  assert(worst < 2, `worst half-metre step was ${worst.toFixed(2)} m`);
+});
+
+check('the settlement pad is flat and the player starts on it', () => {
+  const t = createTerrain(1);
+  for (let x = -8; x <= 8; x += 2) {
+    for (let z = -8; z <= 8; z += 2) {
+      assert(t.slopeAt(x, z) < 0.25, `the pad slopes ${t.slopeAt(x, z).toFixed(2)} rad at ${x},${z}`);
+    }
+  }
+  const w = createWorld({ seed: 1, props: 40 });
+  near(w.player.pos[1], t.heightAt(0, 0), 1e-6, 'the player starts on the ground');
+});
+
+check('walking forward moves the character, and stopping stops it', () => {
+  const w = createWorld({ seed: 3, props: 0 });
+  const start = [...w.player.pos];
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  for (let i = 0; i < 60; i++) w.tick(1 / 60, walk);   // one second
+  const dist = Math.hypot(w.player.pos[0] - start[0], w.player.pos[2] - start[2]);
+  assert(dist > 3.5, `one second of running covered only ${dist.toFixed(2)} m`);
+  assert(dist < RUN_SPEED * 1.05, `one second of running covered ${dist.toFixed(2)} m, faster than the top speed`);
+  for (let i = 0; i < 30; i++) w.tick(1 / 60, idleIntent());
+  assert(w.player.speed < 0.05, `the character is still moving at ${w.player.speed.toFixed(2)} m/s`);
+});
+
+check('a body has mass — it does not reach top speed instantly', () => {
+  const w = createWorld({ seed: 3, props: 0 });
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  w.tick(1 / 60, walk);
+  assert(w.player.speed < RUN_SPEED * 0.25, `one tick reached ${w.player.speed.toFixed(2)} m/s`);
+  for (let i = 0; i < 30; i++) w.tick(1 / 60, walk);
+  assert(w.player.speed > RUN_SPEED * 0.9, `half a second only reached ${w.player.speed.toFixed(2)} m/s`);
+});
+
+check('sneaking is slower than walking is slower than running', () => {
+  const speeds = {};
+  for (const [name, intent] of Object.entries({
+    sneak: { forward: 1, run: true, sneak: true },
+    walk: { forward: 1, run: false },
+    run: { forward: 1, run: true },
+  })) {
+    const w = createWorld({ seed: 3, props: 0 });
+    const i = { ...idleIntent(), ...intent };
+    for (let t = 0; t < 90; t++) w.tick(1 / 60, i);
+    speeds[name] = w.player.speed;
+  }
+  assert(speeds.sneak < speeds.walk, `sneak ${speeds.sneak} !< walk ${speeds.walk}`);
+  assert(speeds.walk < speeds.run, `walk ${speeds.walk} !< run ${speeds.run}`);
+});
+
+check('the character never falls through the world', () => {
+  const w = createWorld({ seed: 9, props: 60 });
+  const rng = makeRng(11);
+  const intent = idleIntent();
+  for (let t = 0; t < 3600; t++) {                      // a minute of wandering
+    if (t % 40 === 0) {
+      intent.forward = rng.range(-1, 1);
+      intent.strafe = rng.range(-1, 1);
+      intent.turn = rng.range(-2, 2);
+      intent.jump = rng.chance(0.15);
+    }
+    w.tick(1 / 60, intent);
+    const ground = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    assert(w.player.pos[1] >= ground - 0.01,
+      `the character is ${(ground - w.player.pos[1]).toFixed(2)} m under the ground at tick ${t}`);
+    assert(Number.isFinite(w.player.pos[0] + w.player.pos[1] + w.player.pos[2]),
+      `the character's position went to ${w.player.pos} at tick ${t}`);
+  }
+});
+
+check('a jump leaves the ground and lands again', () => {
+  const w = createWorld({ seed: 3, props: 0 });
+  w.tick(1 / 60, { ...idleIntent(), jump: true });
+  assert(!w.player.onGround, 'the jump never left the ground');
+  let air = 0;
+  while (!w.player.onGround && air < 300) { w.tick(1 / 60, idleIntent()); air++; }
+  assert(w.player.onGround, 'the character never landed');
+  assert(air > 20 && air < 120, `the jump lasted ${air} ticks, which is not a jump`);
+});
+
+check('a tree is solid', () => {
+  const w = createWorld({ seed: 7, props: 0 });
+  // Put one obstacle directly in front of a character running north.
+  const tree = { pos: [w.player.pos[0], w.player.pos[1] + 3, w.player.pos[2] + 4],
+                 scale: [0.6, 6, 0.6], radius: 0.5, yaw: 0, albedo: [0, 0, 0] };
+  w.props.push(tree);
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  for (let t = 0; t < 180; t++) w.tick(1 / 60, walk);
+  const gap = Math.hypot(w.player.pos[0] - tree.pos[0], w.player.pos[2] - tree.pos[2]);
+  assert(gap > 0.7, `the character walked to ${gap.toFixed(2)} m of a 0.5 m trunk`);
+  assert(w.player.pos[2] < tree.pos[2], 'the character walked through the tree');
+});
+
+check('the camera stays out of the ground and behind the player', () => {
+  const w = createWorld({ seed: 5, props: 120 });
+  const rng = makeRng(3);
+  const intent = idleIntent();
+  for (let t = 0; t < 1800; t++) {
+    if (t % 30 === 0) { intent.forward = rng.range(-1, 1); intent.turn = rng.range(-2.5, 2.5); }
+    w.tick(1 / 60, intent);
+    const floor = w.terrain.heightAt(w.camera.pos[0], w.camera.pos[2]);
+    assert(w.camera.pos[1] >= floor + 0.3 - 1e-6,
+      `the camera is ${(floor - w.camera.pos[1]).toFixed(2)} m into the hillside at tick ${t}`);
+    const toPlayer = Math.hypot(w.camera.pos[0] - w.player.pos[0], w.camera.pos[2] - w.player.pos[2]);
+    assert(toPlayer < 6, `the camera drifted ${toPlayer.toFixed(1)} m from the player`);
+  }
+});
+
+check('the simulation is deterministic from the seed', () => {
+  const run = () => {
+    const w = createWorld({ seed: 42, props: 80 });
+    const rng = makeRng(8);
+    const intent = idleIntent();
+    for (let t = 0; t < 600; t++) {
+      if (t % 25 === 0) { intent.forward = rng.range(-1, 1); intent.turn = rng.range(-2, 2); intent.jump = rng.chance(0.1); }
+      w.tick(1 / 60, intent);
+    }
+    return [...w.player.pos, w.player.yaw, ...w.camera.pos];
+  };
+  const a = run(), b = run();
+  for (let i = 0; i < a.length; i++) eq(a[i], b[i], `component ${i} diverged`);
+});
+
+check('the scene the renderer reads has terrain, props and a character in it', () => {
+  const w = createWorld({ seed: 2, props: 50 });
+  w.tick(1 / 60, idleIntent());
+  const s = w.scene();
+  assert(s.boxes.length >= 3, 'the scene has almost nothing in it');
+  assert(w.chunks().length === 9, 'nine chunks around the player');
+  const chunk = w.chunks()[4];
+  assert(chunk.verts.length > 0 && chunk.index.length > 0, 'the centre chunk is empty');
+  // Every vertex must be finite, or the GPU draws nothing and says nothing.
+  for (let i = 0; i < chunk.verts.length; i++) {
+    assert(Number.isFinite(chunk.verts[i]), `vertex component ${i} is ${chunk.verts[i]}`);
+  }
 });
 
 // --- report ------------------------------------------------------------------

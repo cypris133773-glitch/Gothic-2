@@ -2,14 +2,17 @@
   "name": "grimward",
   "version": "0.0.1",
   "private": true,
-  "description": "GRIMWARD — an open-world action RPG in the 2003 German RPG tradition, running in a browser tab.",
+  "description": "GRIMWARD \u2014 an open-world action RPG in the 2003 German RPG tradition, running in a browser tab.",
   "type": "module",
   "scripts": {
     "start": "node tools/serve.js",
     "dev": "node tools/serve.js",
     "test": "node tools/test.js",
     "shot": "node tools/shot.mjs",
-    "caps": "node tools/shot.mjs --caps"
+    "play": "node tools/play.mjs",
+    "perf": "node tools/perf.mjs",
+    "perf:baseline": "node tools/perf.mjs --baseline",
+    "check": "npm test && npm run shot && npm run play"
   },
   "engines": {
     "node": ">=18"

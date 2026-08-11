@@ -13,16 +13,19 @@ says what is unknown, what it blocks, and when it has to be answered.
 
 ## Open, blocking a milestone
 
-- **M1 — what is the real frame budget on this machine class?** The perf probe
-  does not exist yet, so every number in §9.7 of the brief is a target and none
-  is a measurement. Nothing may be claimed about frame time until `tools/perf.mjs`
-  runs on hardware with a GPU.
-- **M2 — key events through CDP without a WebSocket client.** The render gate
-  needs no input, but the character-controller test does, and driving real key
-  events means talking to the DevTools protocol. Either write a minimal
-  WebSocket client (~120 lines, no dependency) or accept `playwright` as the
-  single dev dependency. Decide before M2 starts; do not let it be decided by
-  whichever is convenient at the time.
+- **M1 — what is the real frame budget?** `tools/perf.mjs` exists and records
+  p50/p95/p99 with the environment attached, but every number so far comes from
+  SwiftShader on a CPU. They are a regression signal and nothing else. The
+  hardware budgets in §9.7 of the brief remain unmeasured, and no claim about
+  anyone's frame rate may be made until the probe has run on a machine with a
+  GPU.
+- ~~**M2 — key events through CDP without a WebSocket client.**~~ **Decided:**
+  written out, in `tools/cdp.mjs`. About 150 lines of HTTP upgrade and frame
+  parsing buys real `Input.dispatchKeyEvent` against the real page and keeps
+  `npm install` unnecessary for the entire project — CI checks out and runs.
+  The one subtlety that would have bitten later: Chrome fragments large
+  evaluate results across continuation frames, so the reader stitches them
+  rather than parsing a half message.
 - **M3 — navmesh or grid?** A 0.5 m grid with jump links is simpler, bakeable and
   adequate for 60–80 NPCs; a real navmesh is smaller and smoother. The schedule
   validator (every routine waypoint pathable from the previous within its

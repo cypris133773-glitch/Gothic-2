@@ -1,0 +1,93 @@
+// Keyboard, mouse and touch, reduced to one intent object.
+//
+// The game never reads a key. It reads `intent`, which is the same shape
+// whether it came from a keyboard, a gamepad, a touch stick or a bot — and that
+// is what makes the headless tests possible and what will make rebinding a
+// settings screen rather than a refactor.
+//
+// Two things here look like paranoia and are not. Pointer lock can be refused
+// (a sandboxed iframe, a browser policy, a user gesture that did not count), so
+// there is a keyboard turn axis that works without it. And keys are tracked by
+// `code`, not `key`, so a French or German keyboard moves forward with the key
+// in the same place rather than the one with the same letter.
+
+const DEFAULT_BINDINGS = {
+  forward: ['KeyW', 'ArrowUp'],
+  back: ['KeyS', 'ArrowDown'],
+  left: ['KeyA'],
+  right: ['KeyD'],
+  turnLeft: ['ArrowLeft', 'KeyQ'],
+  turnRight: ['ArrowRight', 'KeyE'],
+  jump: ['Space'],
+  sneak: ['ControlLeft', 'KeyC'],
+  walk: ['ShiftLeft'],
+};
+
+export function createInput(canvas, opts = {}) {
+  const down = new Set();
+  const bindings = { ...DEFAULT_BINDINGS, ...(opts.bindings || {}) };
+  const sensitivity = opts.sensitivity || 0.0022;
+  let mouseDX = 0, mouseDY = 0;
+  let locked = false;
+
+  const held = (action) => bindings[action].some((code) => down.has(code));
+
+  addEventListener('keydown', (e) => {
+    down.add(e.code);
+    // Space scrolls the page and F-keys do worse; only swallow what we bind.
+    if (Object.values(bindings).some((codes) => codes.includes(e.code))) e.preventDefault();
+  });
+  addEventListener('keyup', (e) => down.delete(e.code));
+  // A tab that loses focus must not keep walking north for ever.
+  addEventListener('blur', () => down.clear());
+
+  if (canvas) {
+    canvas.addEventListener('click', () => {
+      if (!locked && canvas.requestPointerLock) {
+        // Older Safari returns undefined rather than a promise; both are fine,
+        // and a rejection is not an error — it is a browser saying no.
+        try { Promise.resolve(canvas.requestPointerLock()).catch(() => {}); } catch { /* refused */ }
+      }
+    });
+    document.addEventListener('pointerlockchange', () => {
+      locked = document.pointerLockElement === canvas;
+    });
+    addEventListener('mousemove', (e) => {
+      if (!locked) return;
+      mouseDX += e.movementX * sensitivity;
+      mouseDY += e.movementY * sensitivity;
+    });
+  }
+
+  const intent = {
+    forward: 0, strafe: 0, turn: 0, look: 0,
+    jump: false, sneak: false, run: true,
+  };
+
+  return {
+    get locked() { return locked; },
+    /** Drain the accumulated input into an intent for this tick. */
+    sample(dt) {
+      intent.forward = (held('forward') ? 1 : 0) - (held('back') ? 1 : 0);
+      intent.strafe = (held('right') ? 1 : 0) - (held('left') ? 1 : 0);
+      const keyTurn = (held('turnRight') ? 1 : 0) - (held('turnLeft') ? 1 : 0);
+      // Mouse deltas are per-frame quantities, so they are converted to a rate
+      // before the simulation sees them — otherwise the same flick turns you
+      // further on a slow machine.
+      intent.turn = keyTurn * 2.4 + (dt > 0 ? mouseDX / dt : 0);
+      intent.look = dt > 0 ? -mouseDY / dt : 0;
+      intent.jump = held('jump');
+      intent.sneak = held('sneak');
+      intent.run = !held('walk');
+      mouseDX = 0; mouseDY = 0;
+      return intent;
+    },
+    /** For the dev overlay and for tests that want to see what was pressed. */
+    get pressed() { return [...down]; },
+  };
+}
+
+/** An intent that does nothing — the starting point for bots and cutscenes. */
+export function idleIntent() {
+  return { forward: 0, strafe: 0, turn: 0, look: 0, jump: false, sneak: false, run: true };
+}

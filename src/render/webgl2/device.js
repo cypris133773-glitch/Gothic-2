@@ -1,12 +1,14 @@
-// The WebGL2 backend. At M0 it draws one lit box, which is a smaller claim than
-// it sounds: it proves context creation, shader compilation, attribute layout,
-// depth testing, resize handling, an sRGB-correct output and the matrix stack —
-// every one of which is a thing that silently produces a black rectangle when
-// it is wrong, and none of which gets easier to debug once there is a forest in
-// front of it.
+// The WebGL2 backend.
 //
-// WebGL2 is the backend that must work everywhere, so it is the one that ships
-// first. The WebGPU backend arrives later behind the same interface (§9.1).
+// It draws two things: a terrain mesh with per-vertex colour, and a list of
+// oriented boxes. That is a deliberately small vocabulary — every prop, tree,
+// rock and character in the game right now is a box — because the point of M2
+// is that the world is walkable, and a renderer with one shader and two draw
+// paths is one that cannot hide a bug behind its own complexity.
+//
+// WebGL2 is the backend that has to work everywhere, so it ships first. The
+// WebGPU backend arrives at M9 behind the same interface (§9.1), which is why
+// nothing outside this directory has ever heard of `gl`.
 
 import { link } from './shader.js';
 import * as m from '../../core/math.js';
@@ -16,6 +18,7 @@ precision highp float;
 
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
+layout(location = 2) in vec3 aColor;
 
 uniform mat4 uProj;
 uniform mat4 uView;
@@ -24,11 +27,13 @@ uniform mat4 uNormal;
 
 out vec3 vNormal;
 out vec3 vWorld;
+out vec3 vColor;
 
 void main() {
   vec4 world = uModel * vec4(aPos, 1.0);
   vWorld = world.xyz;
   vNormal = mat3(uNormal) * aNormal;
+  vColor = aColor;
   gl_Position = uProj * uView * world;
 }`;
 
@@ -37,19 +42,21 @@ precision highp float;
 
 in vec3 vNormal;
 in vec3 vWorld;
+in vec3 vColor;
 
-uniform vec3 uSunDir;      // toward the sun, normalised
+uniform vec3 uSunDir;      // toward the key light, normalised
 uniform vec3 uSunColor;
 uniform vec3 uSkyColor;    // hemisphere ambient, up
 uniform vec3 uGroundColor; // hemisphere ambient, down
-uniform vec3 uAlbedo;
+uniform vec3 uAlbedo;      // per-draw tint, multiplied by the vertex colour
 uniform vec3 uEye;
+uniform vec3 uFogColor;
 
 out vec4 outColor;
 
-// ACES filmic, Narkowicz's fit. The tonemapper is here at M0 rather than added
-// later because everything authored under a different response curve has to be
-// re-authored when it lands, and that is a whole art pass wasted.
+// ACES filmic, Narkowicz's fit. The tonemapper is here rather than added later
+// because everything authored under a different response curve has to be
+// re-authored when it lands, and that is an art pass thrown away.
 vec3 aces(vec3 x) {
   const float a = 2.51, b = 0.03, c = 2.43, d = 0.59, e = 0.14;
   return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
@@ -57,29 +64,37 @@ vec3 aces(vec3 x) {
 
 void main() {
   vec3 n = normalize(vNormal);
-  vec3 v = normalize(uEye - vWorld);
+  vec3 toEye = uEye - vWorld;
+  float dist = length(toEye);
+  vec3 v = toEye / max(dist, 0.001);
 
   float ndl = max(dot(n, uSunDir), 0.0);
   vec3 direct = uSunColor * ndl;
 
   // A hemisphere ambient rather than a flat constant: the sky lights the tops
-  // of things and the ground bounces into their undersides, and the difference
+  // of things and the ground bounces into their undersides. The difference
   // between those two terms is most of what makes an object look outdoors.
   vec3 ambient = mix(uGroundColor, uSkyColor, n.y * 0.5 + 0.5);
 
-  // One cheap specular lobe so a surface has a direction, plus a rim term that
-  // stands an object off its background the way a real sky does.
   vec3 h = normalize(uSunDir + v);
-  float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.25 * step(0.001, ndl);
-  float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.18;
+  float spec = pow(max(dot(n, h), 0.0), 48.0) * 0.18 * step(0.001, ndl);
+  float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.14;
 
-  vec3 lit = uAlbedo * (direct + ambient) + uSunColor * spec + uSkyColor * rim;
+  vec3 albedo = uAlbedo * vColor;
+  vec3 lit = albedo * (direct + ambient) + uSunColor * spec + uSkyColor * rim;
+
+  // Aerial perspective, cheaply: distance fades toward the sky colour, which is
+  // what gives a landscape its depth and what stops distant terrain reading as
+  // a painted backdrop.
+  float fog = 1.0 - exp(-dist * 0.0055);
+  lit = mix(lit, uFogColor, fog * 0.85);
+
   outColor = vec4(pow(aces(lit), vec3(1.0 / 2.2)), 1.0);
 }`;
 
-// Unit cube, 24 vertices so each face gets its own normal. Interleaved as
-// position(3) + normal(3) because one buffer and one stride is one fewer thing
-// to get wrong than two buffers.
+// Unit cube, 24 vertices so each face keeps its own normal. Interleaved as
+// position(3) + normal(3) + colour(3): one buffer, one stride, one thing to get
+// wrong instead of three.
 function cubeMesh() {
   const faces = [
     { n: [0, 0, 1], v: [[-1, -1, 1], [1, -1, 1], [1, 1, 1], [-1, 1, 1]] },
@@ -92,7 +107,9 @@ function cubeMesh() {
   const data = [];
   const index = [];
   faces.forEach((f, fi) => {
-    for (const v of f.v) data.push(v[0] * 0.5, v[1] * 0.5, v[2] * 0.5, f.n[0], f.n[1], f.n[2]);
+    for (const v of f.v) {
+      data.push(v[0] * 0.5, v[1] * 0.5, v[2] * 0.5, f.n[0], f.n[1], f.n[2], 1, 1, 1);
+    }
     const b = fi * 4;
     index.push(b, b + 1, b + 2, b, b + 2, b + 3);
   });
@@ -106,35 +123,43 @@ export function createWebGL2Device(canvas) {
     depth: true,
     stencil: false,
     powerPreference: 'high-performance',
-    preserveDrawingBuffer: true, // the screenshot tool reads the buffer after a frame
+    preserveDrawingBuffer: true, // the render gate reads the buffer back
   });
   if (!gl) throw new Error('WebGL2 context creation returned null');
 
   const { program, uniforms } = link(gl, VERT, FRAG, 'basic-lit');
-  const mesh = cubeMesh();
+  const STRIDE = 9 * 4;
 
-  const vao = gl.createVertexArray();
-  gl.bindVertexArray(vao);
-  const vbo = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
-  gl.bufferData(gl.ARRAY_BUFFER, mesh.data, gl.STATIC_DRAW);
-  const ibo = gl.createBuffer();
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, mesh.index, gl.STATIC_DRAW);
-  const stride = 6 * 4;
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, stride, 0);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, stride, 3 * 4);
-  gl.bindVertexArray(null);
+  function makeVao(verts, index, indexType) {
+    const vao = gl.createVertexArray();
+    gl.bindVertexArray(vao);
+    const vbo = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
+    gl.bufferData(gl.ARRAY_BUFFER, verts, gl.STATIC_DRAW);
+    const ibo = gl.createBuffer();
+    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibo);
+    gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, index, gl.STATIC_DRAW);
+    for (let loc = 0; loc < 3; loc++) {
+      gl.enableVertexAttribArray(loc);
+      gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, STRIDE, loc * 3 * 4);
+    }
+    gl.bindVertexArray(null);
+    return { vao, count: index.length, type: indexType };
+  }
+
+  const cube = cubeMesh();
+  const cubeVao = makeVao(cube.data, cube.index, gl.UNSIGNED_SHORT);
+  let chunks = [];
 
   gl.enable(gl.DEPTH_TEST);
   gl.enable(gl.CULL_FACE);
   gl.cullFace(gl.BACK);
 
-  // Scratch matrices, allocated once. Nothing in draw() allocates (§8.1.4).
-  const proj = m.mat4(), view = m.mat4(), model = m.mat4(), nrm = m.mat4(), rotX = m.mat4();
-  const eye = m.vec3(2.2, 1.7, 5.0), target = m.vec3(0, 0.7, -0.6), up = m.vec3(0, 1, 0);
+  // Scratch, allocated once: nothing in draw() allocates (§8.1.4).
+  const proj = m.mat4(), view = m.mat4(), model = m.mat4(), nrm = m.mat4();
+  const rotX = m.mat4(), ident = m.identity(m.mat4());
+  const up = m.vec3(0, 1, 0);
+  const white = new Float32Array([1, 1, 1]);
 
   let width = 0, height = 0;
   let drawCalls = 0, triangles = 0;
@@ -146,16 +171,21 @@ export function createWebGL2Device(canvas) {
     gl.viewport(0, 0, w, h);
   }
 
+  /** Hand the renderer the terrain chunks. Called when the world is built. */
+  function setTerrain(built) {
+    for (const c of chunks) gl.deleteVertexArray(c.vao);
+    chunks = built.map((c) => makeVao(c.verts, c.index, gl.UNSIGNED_INT));
+  }
+
   function draw(scene) {
     drawCalls = 0; triangles = 0;
-    // Sky colour is time-of-day driven even at M0, because the clock is the one
-    // system everything else eventually reads from and it is cheap to wire now.
     const [r, g, b] = scene.skyColor;
     gl.clearColor(r, g, b, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-    m.perspective(proj, 60 * m.DEG, width / Math.max(1, height), 0.1, 500);
-    m.lookAt(view, eye, target, up);
+    const cam = scene.camera;
+    m.perspective(proj, cam.fov * m.DEG, width / Math.max(1, height), 0.1, 600);
+    m.lookAt(view, cam.pos, cam.target, up);
 
     gl.useProgram(program);
     gl.uniformMatrix4fv(uniforms.uProj, false, proj);
@@ -164,16 +194,27 @@ export function createWebGL2Device(canvas) {
     gl.uniform3fv(uniforms.uSunColor, scene.sunColor);
     gl.uniform3fv(uniforms.uSkyColor, scene.skyLight);
     gl.uniform3fv(uniforms.uGroundColor, scene.groundLight);
-    gl.uniform3fv(uniforms.uEye, eye);
+    gl.uniform3fv(uniforms.uFogColor, scene.skyColor);
+    gl.uniform3fv(uniforms.uEye, cam.pos);
 
-    gl.bindVertexArray(vao);
+    // Terrain first: it is opaque, it covers most of the screen, and drawing it
+    // before the props means the depth buffer rejects most of their pixels.
+    gl.uniformMatrix4fv(uniforms.uModel, false, ident);
+    gl.uniformMatrix4fv(uniforms.uNormal, false, ident);
+    gl.uniform3fv(uniforms.uAlbedo, white);
+    for (const c of chunks) {
+      gl.bindVertexArray(c.vao);
+      gl.drawElements(gl.TRIANGLES, c.count, c.type, 0);
+      drawCalls++; triangles += c.count / 3;
+    }
+
+    gl.bindVertexArray(cubeVao.vao);
     for (const box of scene.boxes) {
       m.fromRotationY(model, box.yaw);
       if (box.pitch) m.multiply(model, model, m.fromRotationX(rotX, box.pitch));
-      // Scale is folded into the rotation columns rather than a fourth matrix
-      // multiply; at one box it is noise, at ninety thousand instances it is not.
-      // A number scales uniformly, a triple scales per axis — which is what
-      // turns the same unit cube into a ground slab, a wall and a fencepost.
+      // Scale folds into the rotation columns rather than costing a fourth
+      // matrix multiply. A number scales uniformly, a triple per axis — which
+      // is what turns one unit cube into a trunk, a boulder and a torso.
       const s = box.scale;
       const sx = typeof s === 'number' ? s : s[0];
       const sy = typeof s === 'number' ? s : s[1];
@@ -186,8 +227,8 @@ export function createWebGL2Device(canvas) {
       gl.uniformMatrix4fv(uniforms.uModel, false, model);
       gl.uniformMatrix4fv(uniforms.uNormal, false, nrm);
       gl.uniform3fv(uniforms.uAlbedo, box.albedo);
-      gl.drawElements(gl.TRIANGLES, mesh.index.length, gl.UNSIGNED_SHORT, 0);
-      drawCalls++; triangles += mesh.index.length / 3;
+      gl.drawElements(gl.TRIANGLES, cubeVao.count, cubeVao.type, 0);
+      drawCalls++; triangles += cubeVao.count / 3;
     }
     gl.bindVertexArray(null);
   }
@@ -209,8 +250,8 @@ export function createWebGL2Device(canvas) {
     for (let i = 0; i < px.length; i += 4) {
       const l = (px[i] * 0.299 + px[i + 1] * 0.587 + px[i + 2] * 0.114);
       sum += l; if (l < min) min = l; if (l > max) max = l;
-      // Quantised to 5 bits per channel: shading gradients should still produce
-      // hundreds of buckets, while sampling noise should not inflate the count.
+      // Quantised to 5 bits per channel: shading gradients still produce
+      // hundreds of buckets, sampling noise does not inflate the count.
       seen.add(((px[i] >> 3) << 10) | ((px[i + 1] >> 3) << 5) | (px[i + 2] >> 3));
     }
     const n = px.length / 4;
@@ -221,6 +262,7 @@ export function createWebGL2Device(canvas) {
     backend: 'webgl2',
     gl,
     resize,
+    setTerrain,
     draw,
     readPixelStats,
     get stats() { return { drawCalls, triangles, width, height }; },

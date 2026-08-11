@@ -1,0 +1,46 @@
+# Every push and pull request gets a signal before anyone looks at the diff.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # There are no dependencies to install. That is deliberate, and this step
+      # is here to keep it true: if a runtime dependency ever appears, this
+      # fails and someone has to argue for it.
+      - name: No runtime dependencies
+        run: |
+          if [ -d node_modules ]; then echo "::error::node_modules is committed"; exit 1; fi
+          node -e "const p=require('./package.json');
+                   const d={...p.dependencies};
+                   if (Object.keys(d).length) { console.error('runtime deps:', d); process.exit(1); }"
+
+      - name: Logic tests
+        run: npm test
+
+      # A black screen is the failure mode that a logic test cannot see, so the
+      # build renders the game in a real browser and asserts on the pixels.
+      # Ubuntu runners have Chromium; SwiftShader does the rasterising.
+      - name: Render gate
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq chromium-browser || sudo snap install chromium || true
+          CHROME=$(command -v chromium || command -v chromium-browser || command -v google-chrome) npm run shot
+
+      - name: Keep the framings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: framings
+          path: shots/
+          if-no-files-found: warn

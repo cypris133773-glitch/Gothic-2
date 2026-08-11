@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>GRIMWARD</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<!-- The canvas is the game. Everything in the DOM besides it is a fallback, an
+     overlay, or a piece of chrome the canvas cannot draw (text input, links). -->
+<canvas id="view"></canvas>
+
+<!-- Shown when the capability gate refuses the machine. It is plain DOM on
+     purpose: if we are here, we cannot rely on being able to draw anything. -->
+<div id="gate" hidden>
+  <h1>GRIMWARD cannot run here</h1>
+  <p id="gate-why"></p>
+</div>
+
+<div id="overlay"></div>
+
+<script type="module" src="src/main.js"></script>
+</body>
+</html>

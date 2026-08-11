@@ -1,0 +1,4 @@
+node_modules/
+shots/*.dom.html
+.DS_Store
+dist/

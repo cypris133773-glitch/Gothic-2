@@ -118,8 +118,18 @@ async function run() {
     // frame — the DOM was dumped first and never contained it — and it matters
     // beyond tidiness, because every extra headless Chromium on this machine
     // makes the next one likelier to start and render nothing.
-    let dom = await launch(chrome, url, { png, dump: true });
-    if (!/<title>PROBE/.test(dom)) dom = await launch(chrome, url, { png, dump: true });
+    // Up to three attempts, with a breath between them. A cold headless
+    // Chromium on a busy machine sometimes starts, loads nothing and exits
+    // zero — the page never ran, so there is nothing to assert on. Retrying is
+    // right here in a way it usually is not: the failure is in the harness's
+    // environment, not in the thing under test, and the assertions below are
+    // unchanged either way.
+    let dom = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) await new Promise((r) => setTimeout(r, 1500));
+      dom = await launch(chrome, url, { png, dump: true });
+      if (/<title>PROBE/.test(dom)) break;
+    }
     let probe;
     try { probe = parseProbe(dom); }
     catch (e) {
@@ -233,15 +243,30 @@ function decodePng(file) {
       out[y * stride + x] = v & 0xff;
     }
   }
+  // Headless Chromium photographs the whole window, and the page's viewport is
+  // shorter than that — the strip below it is black and belongs to the browser,
+  // not to the game. Trimming the uniformly-black bottom rows is what lets the
+  // image's statistics be compared with the page's own.
+  let lastRow = height - 1;
+  const rowIsBlack = (y) => {
+    for (let x = 0; x < width; x++) {
+      const i = y * stride + x * channels;
+      if (out[i] > 6 || out[i + 1] > 6 || out[i + 2] > 6) return false;
+    }
+    return true;
+  };
+  while (lastRow > height * 0.5 && rowIsBlack(lastRow)) lastRow--;
+  const usable = (lastRow + 1) * stride;
+
   let sum = 0, min = 255, max = 0;
   const seen = new Set();
-  for (let i = 0; i < out.length; i += channels) {
+  for (let i = 0; i < usable; i += channels) {
     const l = out[i] * 0.299 + out[i + 1] * 0.587 + out[i + 2] * 0.114;
     sum += l; if (l < min) min = l; if (l > max) max = l;
     seen.add(((out[i] >> 3) << 10) | ((out[i + 1] >> 3) << 5) | (out[i + 2] >> 3));
   }
-  const n = out.length / channels;
-  return { width, height, meanLuma: +(sum / n).toFixed(2), minLuma: Math.round(min), maxLuma: Math.round(max), colors: seen.size };
+  const n = usable / channels;
+  return { width, height: lastRow + 1, meanLuma: +(sum / n).toFixed(2), minLuma: Math.round(min), maxLuma: Math.round(max), colors: seen.size };
 }
 
 function report(results) {

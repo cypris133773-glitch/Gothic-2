@@ -127,9 +127,16 @@ export function skyPalette(minutesOfDay) {
     // The clear colour: deep blue at night, cold blue-grey by day, and orange
     // through the band in between.
     sky: [
-      0.020 + day * 0.30 + twilight * 0.34 + moon * 0.20,
-      0.028 + day * 0.40 + twilight * 0.17 + moon * 0.26,
-      0.055 + day * 0.58 + twilight * 0.06 + moon * 0.45,
+      0.020 + day * 0.24 + twilight * 0.30 + moon * 0.16,
+      0.028 + day * 0.33 + twilight * 0.15 + moon * 0.21,
+      0.055 + day * 0.52 + twilight * 0.06 + moon * 0.38,
+    ],
+    // The zenith is deeper and bluer than the horizon at every hour — that
+    // vertical gradient is most of what makes a sky read as a sky.
+    zenith: [
+      0.012 + day * 0.10 + twilight * 0.10 + moon * 0.08,
+      0.020 + day * 0.19 + twilight * 0.07 + moon * 0.13,
+      0.050 + day * 0.52 + twilight * 0.10 + moon * 0.36,
     ],
     // The key light. It never quite reaches zero because moonlight is a
     // directional light too — a dim, blue one.

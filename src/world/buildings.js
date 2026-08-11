@@ -1,0 +1,212 @@
+// Half-timbered buildings, from a small grammar.
+//
+// A house is: a stone base, a plaster ground floor, an upper floor that
+// overhangs it, a lattice of dark timber across the plaster, a steep gabled
+// roof, a door and some windows. That description is the generator — thirty to
+// fifty boxes, laid out in the building's local frame and then rotated into the
+// world as a unit, which is why a street of them can be placed by writing down
+// a position and an angle.
+//
+// The overhang ("jetty") and the steep roof are what make the silhouette read
+// as Northern-European medieval rather than as a shed. They are worth the eight
+// lines they cost.
+
+import { makeRng, hash } from '../core/rng.js';
+
+// Albedos, not screen colours: these are multiplied by a sun of about 2.6 and
+// then exposed and tonemapped, so a "white" plaster wall is authored at 0.55
+// and arrives on screen as a warm off-white. Authoring them at the value they
+// should *look* is what produced a town in a snowstorm.
+const PALETTES = [
+  { plaster: [0.55, 0.51, 0.43], timber: [0.11, 0.08, 0.055], roof: [0.15, 0.14, 0.16], stone: [0.30, 0.29, 0.27] },
+  { plaster: [0.48, 0.45, 0.38], timber: [0.09, 0.065, 0.05], roof: [0.19, 0.13, 0.11], stone: [0.28, 0.27, 0.26] },
+  { plaster: [0.58, 0.53, 0.44], timber: [0.13, 0.09, 0.065], roof: [0.13, 0.14, 0.17], stone: [0.31, 0.30, 0.28] },
+];
+
+/**
+ * @param {object} spec { x, z, ground, yaw, w, d, storeys, seed }
+ * @returns {Array} boxes, ready for the scene
+ */
+export function buildHouse(spec) {
+  const rng = makeRng(hash(`house:${spec.x}:${spec.z}:${spec.seed || 0}`));
+  const pal = rng.pick(PALETTES);
+  const w = spec.w ?? rng.range(5.5, 8.0);        // along local X (the ridge)
+  const d = spec.d ?? rng.range(4.5, 6.5);        // along local Z
+  const storeys = spec.storeys ?? (rng.chance(0.55) ? 2 : 1);
+  const storeyH = 2.5;
+  const yaw = spec.yaw ?? 0;
+  const y0 = spec.ground;
+  const out = [];
+
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  /** Place a box given in the building's local frame. */
+  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0) => {
+    out.push({
+      pos: [spec.x + lx * cy + lz * sy, y0 + ly, spec.z - lx * sy + lz * cy],
+      yaw, pitch, scale: [sx, sh, sz], albedo,
+      radius: 0,          // buildings collide as walls, added at the end
+    });
+  };
+
+  // --- stone base ------------------------------------------------------------
+  put(0, 0.28, 0, w + 0.35, 0.56, d + 0.35, pal.stone);
+
+  for (let s = 0; s < storeys; s++) {
+    // Each storey above the first juts out a little over the one below it.
+    const jetty = s === 0 ? 0 : 0.32;
+    const sw = w + jetty * 2, sd = d + jetty * 2;
+    const base = 0.56 + s * storeyH;
+
+    put(0, base + storeyH / 2, 0, sw, storeyH, sd, pal.plaster);
+
+    // Timber: corner posts, a sill and a head rail on each face, and a pair of
+    // diagonal braces. Laid on the outside of the plaster so they read as
+    // structure rather than as paint.
+    const t = 0.17;
+    for (const ex of [-1, 1]) {
+      put(ex * sw / 2, base + storeyH / 2, 0, t, storeyH, sd + 0.02, pal.timber);
+    }
+    for (const ez of [-1, 1]) {
+      put(0, base + storeyH / 2, ez * sd / 2, sw + 0.02, storeyH, t, pal.timber);
+      // rails
+      put(0, base + 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber);
+      put(0, base + storeyH - 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber);
+      // uprights across the face
+      const bays = Math.max(2, Math.round(sw / 1.8));
+      for (let b = 1; b < bays; b++) {
+        const lx = -sw / 2 + (sw * b) / bays;
+        put(lx, base + storeyH / 2, ez * sd / 2, t, storeyH, t * 1.1, pal.timber);
+      }
+      // one diagonal brace per face, tilted in the plane of the wall
+      const brace = Math.hypot(sw / bays, storeyH) * 0.9;
+      out.push({
+        pos: [
+          spec.x + (-sw / 4) * cy + (ez * sd / 2) * sy,
+          y0 + base + storeyH / 2,
+          spec.z - (-sw / 4) * sy + (ez * sd / 2) * cy,
+        ],
+        yaw, pitch: 0, roll: 0.55 * ez,
+        scale: [t, brace, t * 1.1], albedo: pal.timber, radius: 0,
+      });
+    }
+    for (const ex of [-1, 1]) {
+      put(ex * sw / 2, base + 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber);
+      put(ex * sw / 2, base + storeyH - 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber);
+    }
+
+    // --- openings ------------------------------------------------------------
+    const winH = 0.85, winW = 0.75;
+    const windows = Math.max(2, Math.round(sw / 2.4));
+    for (let i = 0; i < windows; i++) {
+      const lx = -sw / 2 + (sw * (i + 0.5)) / windows;
+      for (const ez of [-1, 1]) {
+        // A dark opening with a lighter frame; the frame is what stops a window
+        // reading as a hole punched in a wall.
+        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.03), winW + 0.14, winH + 0.14, 0.06, pal.timber);
+        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.06), winW, winH, 0.05, [0.10, 0.11, 0.13]);
+      }
+    }
+    if (s === 0) {
+      // The door, on the +Z face, with a plank texture implied by two boards.
+      put(0, 1.05, d / 2 + 0.08, 1.05, 2.0, 0.10, [0.16, 0.11, 0.07]);
+      put(-0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber);
+      put(0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber);
+      put(0, 2.12, d / 2 + 0.10, 1.35, 0.16, 0.30, pal.timber);   // lintel
+    }
+  }
+
+  // --- roof ------------------------------------------------------------------
+  // Two slabs meeting at a ridge running along local X, at 49° — steep is the
+  // whole look, and the first attempt got the trigonometry inside out, which
+  // laid the slabs nearly flat and left the plaster gable ends standing up as
+  // two big white rectangles where the roof should have been.
+  //
+  //   ridge height above the eaves = (depth / 2) · tan θ
+  //   slab length along the slope  = (depth / 2) / cos θ
+  //   a slab tilts about local X, and a positive pitch drops its +Z end
+  const eaves = 0.56 + storeys * storeyH;
+  const rw = w + (storeys > 1 ? 0.64 : 0) + 0.9;
+  const rd = d + (storeys > 1 ? 0.64 : 0) + 0.7;
+  const theta = 0.86;
+  const rise = (rd / 2) * Math.tan(theta);
+  const slabLen = (rd / 2) / Math.cos(theta);
+  const ridgeH = eaves + rise;
+  for (const ez of [-1, 1]) {
+    out.push({
+      pos: [
+        spec.x + (ez * rd / 4) * sy,
+        y0 + eaves + rise / 2,
+        spec.z + (ez * rd / 4) * cy,
+      ],
+      yaw, pitch: ez * theta,
+      scale: [rw, 0.18, slabLen], albedo: pal.roof, radius: 0,
+    });
+  }
+  put(0, ridgeH + 0.06, 0, rw + 0.14, 0.20, 0.30, pal.roof);      // ridge cap
+
+  // The gable triangles, approximated by four stacked courses. A single box
+  // would be a rectangle, which is exactly what was wrong before.
+  for (const ex of [-1, 1]) {
+    const courses = 4;
+    for (let c = 0; c < courses; c++) {
+      const t0 = c / courses, t1 = (c + 1) / courses;
+      const yMid = eaves + rise * (t0 + t1) / 2;
+      const depth = rd * (1 - (t0 + t1) / 2) * 0.94;
+      put(ex * (rw / 2 - 0.16), yMid, 0, 0.20, rise / courses + 0.02, depth, pal.plaster);
+    }
+  }
+
+  // --- collision -------------------------------------------------------------
+  // One circle around the footprint. A house is not a circle, but at M2 the
+  // character controller only knows circles, and a slightly generous keep-out
+  // around a building is much better than walking through its front wall. Real
+  // wall collision arrives with the interiors at M3.
+  out.push({
+    pos: [spec.x, y0 + 1.5, spec.z], yaw, pitch: 0,
+    scale: [0.01, 3, 0.01], albedo: [0, 0, 0],
+    radius: Math.max(w, d) * 0.52, invisible: true,
+  });
+
+  return out;
+}
+
+/** A well: a stone ring, two posts, a roof and a bucket. */
+export function buildWell(x, z, ground) {
+  const stone = [0.32, 0.31, 0.29], wood = [0.19, 0.14, 0.09], roof = [0.15, 0.14, 0.15];
+  return [
+    { pos: [x, ground + 0.45, z], yaw: 0.4, pitch: 0, scale: [2.2, 0.9, 2.2], albedo: stone, radius: 1.2 },
+    { pos: [x, ground + 0.95, z], yaw: 0.4, pitch: 0, scale: [1.7, 0.2, 1.7], albedo: [0.12, 0.13, 0.15] },
+    { pos: [x - 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood },
+    { pos: [x + 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood },
+    { pos: [x, ground + 2.9, z - 0.55], yaw: 0, pitch: 0.7, scale: [2.4, 0.12, 1.5], albedo: roof },
+    { pos: [x, ground + 2.9, z + 0.55], yaw: 0, pitch: -0.7, scale: [2.4, 0.12, 1.5], albedo: roof },
+    { pos: [x, ground + 2.55, z], yaw: 0, pitch: 0, scale: [1.9, 0.14, 0.16], albedo: wood },
+    { pos: [x, ground + 1.65, z], yaw: 0.3, pitch: 0, scale: [0.4, 0.42, 0.4], albedo: [0.32, 0.22, 0.14] },
+  ];
+}
+
+/** A market stall: a counter, four posts and a striped awning. */
+export function buildStall(x, z, ground, yaw, seed = 0) {
+  const rng = makeRng(hash(`stall:${x}:${z}:${seed}`));
+  const wood = [0.23, 0.16, 0.10];
+  const cloth = rng.pick([[0.38, 0.12, 0.11], [0.14, 0.19, 0.31], [0.40, 0.33, 0.15]]);
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0, radius = 0) => ({
+    pos: [x + lx * cy + lz * sy, ground + ly, z - lx * sy + lz * cy],
+    yaw, pitch, scale: [sx, sh, sz], albedo, radius,
+  });
+  const out = [
+    put(0, 0.55, 0, 2.6, 0.16, 1.1, wood),
+    put(0, 0.28, 0, 2.4, 0.55, 0.9, [0.18, 0.13, 0.08], 0, 1.2),
+  ];
+  for (const ex of [-1, 1]) for (const ez of [-1, 1]) {
+    out.push(put(ex * 1.2, 1.1, ez * 0.5, 0.10, 2.2, 0.10, wood));
+  }
+  out.push(put(0, 2.28, 0, 2.9, 0.10, 1.5, cloth, 0.18));
+  // Goods on the counter, because an empty stall reads as scenery.
+  for (let i = 0; i < 4; i++) {
+    out.push(put(-0.9 + i * 0.6, 0.75, rng.range(-0.2, 0.2), 0.3, 0.24, 0.3,
+      rng.pick([[0.33, 0.22, 0.08], [0.20, 0.25, 0.11], [0.36, 0.29, 0.14]])));
+  }
+  return out;
+}

@@ -28,8 +28,9 @@ reading before the code.
 
 ## Where it is
 
-**M0 (skeleton), M1 (loop and instrumentation) and M2 (terrain and traversal)
-are done.** What exists, and the command that proves it:
+**M0 (skeleton), M1 (loop and instrumentation), M2 (terrain and traversal) are
+done, and M4/M5 have started: there is a town, and there are people in it.**
+What exists, and the command that proves it:
 
 | | | Proven by |
 | --- | --- | --- |
@@ -42,10 +43,20 @@ are done.** What exists, and the command that proves it:
 | World clock | Two-hour day, twilight, moonlight, sleep-until-hour | `npm test` |
 | Progression | Experience curve, learning points, melee and ranged damage, combo tiers — the §5 numbers with their confidence labels | `npm test` |
 | Determinism | Seeded sfc32 with named sub-streams; the same seed is the same world and the same 600-tick simulation on every machine | `npm test` |
+| Characters | A twenty-two part jointed humanoid — plate, tabard, pauldrons, sword — posed by a walk cycle whose phase follows distance, not time, so feet do not skate. Four kits: knight, guard, villager, smith | `npm run shot` |
+| Town | Nine half-timbered houses from a grammar (stone base, jettied upper floor, timber lattice, 49° gabled roof, doors and windows), a well, market stalls, a cobbled square the terrain flattens for | `npm run shot` |
+| People | Six townsfolk, three of them walking routes with a pause and a turn at each end | `npm run play` |
+| Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
+| Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
 
 Next is **M3** (the worldgen tool, the in-browser placement editor, baked nav
-data) and **M4**, which is the gate that asks whether this looks expensive. The
-milestone table is §14 of the brief.
+data), then the rest of **M4/M5**: LOD and streaming so the town is not the
+whole world, and real interiors. The milestone table is §14 of the brief.
+
+Shadows are tied to the quality tier. They double the geometry submitted per
+frame, which is nothing on a GPU and is the difference between 19 fps and 14 on
+the CPU rasteriser CI runs on, so the `low` tier turns them off and
+`?off=shadows` turns them off anywhere.
 
 ## The render gate
 

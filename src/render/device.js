@@ -9,7 +9,7 @@
 
 import { createWebGL2Device } from './webgl2/device.js';
 
-export async function createDevice(canvas, caps) {
+export async function createDevice(canvas, caps, opts = {}) {
   if (caps.webgpu) {
     // Deliberately not implemented yet, and deliberately not silently ignored:
     // when the WebGPU backend exists this branch constructs it, and until then
@@ -17,5 +17,5 @@ export async function createDevice(canvas, caps) {
     console.info('[render] WebGPU adapter present; the WebGPU backend lands at M9. Using WebGL2.');
   }
   if (!caps.webgl2) throw new Error('No usable rendering backend (WebGL2 unavailable)');
-  return createWebGL2Device(canvas);
+  return createWebGL2Device(canvas, opts);
 }

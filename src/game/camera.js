@@ -6,7 +6,7 @@
 // the field of view, the lag on a turn — is tuning.
 
 const MIN_DIST = 1.1;
-const MAX_DIST = 4.6;
+const MAX_DIST = 5.4;
 const HEAD = 1.55;              // eye height above the character's feet
 const SHOULDER = 0.55;          // over-the-shoulder offset, right of centre
 

@@ -94,7 +94,7 @@ export function createTerrain(seed = 1) {
   }
   const _n = new Float32Array(3);
 
-  return { seed, heightAt, normalAt, slopeAt, size: TERRAIN_SIZE };
+  return { seed, heightAt, normalAt, slopeAt, padFactor: flatten, size: TERRAIN_SIZE };
 }
 
 /**
@@ -125,10 +125,17 @@ export function buildChunk(terrain, cx, cz, chunkSize, res) {
       // settlement pad — which sits at 1.2 m — under beach sand, and the render
       // gate photographed a village built on a salt flat.
       const shore = 1 - smooth01((y - SEA_LEVEL) / 1.1);
-      const gr = [0.19, 0.25, 0.12], rk = [0.31, 0.29, 0.27], sh = [0.42, 0.39, 0.31];
+      const gr = [0.13, 0.18, 0.08], rk = [0.22, 0.21, 0.19], sh = [0.30, 0.28, 0.22];
+      // Where the town flattens the ground, the ground is paved. The cobbles
+      // vary per-vertex so the square is not a flat grey field, which is most
+      // of what sells a paved surface without a texture.
+      const paved = smooth01((terrain.padFactor(x, z) - 0.45) / 0.35);
+      const grain = 0.86 + fbm(1, x * 2.7, z * 2.7, 2) * 0.34;
+      const cob = [0.17 * grain, 0.163 * grain, 0.152 * grain];
       for (let c = 0; c < 3; c++) {
         const base = gr[c] * (1 - rock) + rk[c] * rock;
-        verts[v++] = base * (1 - shore) + sh[c] * shore;
+        const land = base * (1 - shore) + sh[c] * shore;
+        verts[v++] = land * (1 - paved) + cob[c] * paved;
       }
     }
   }
@@ -157,6 +164,7 @@ export function scatter(terrain, count, bounds) {
     const y = terrain.heightAt(x, z);
     const slope = terrain.slopeAt(x, z);
     if (y < 0.8 || slope > 0.6) continue;              // no props in the sea or on cliffs
+    if (terrain.padFactor(x, z) > 0.3) continue;       // and none in the town
     const tree = rng.chance(0.62) && slope < 0.35;
     const h = tree ? rng.range(4.5, 9.5) : rng.range(0.5, 1.9);
     const w = tree ? rng.range(0.35, 0.6) : h * rng.range(0.7, 1.3);
@@ -165,7 +173,7 @@ export function scatter(terrain, count, bounds) {
       pos: [x, y + h / 2, z],
       yaw, pitch: 0,
       scale: [w, h, w],
-      albedo: tree ? [0.15, 0.10, 0.07] : [0.30, 0.29, 0.27],
+      albedo: tree ? [0.10, 0.07, 0.05] : [0.21, 0.20, 0.19],
       radius: w * 0.7,
       spin: 0,
     });
@@ -177,7 +185,7 @@ export function scatter(terrain, count, bounds) {
         pos: [x, y + h * 0.86, z],
         yaw: yaw * 0.6, pitch: 0,
         scale: [cw, rng.range(2.4, 3.6), cw],
-        albedo: [0.13 + rng.range(0, 0.04), 0.20 + rng.range(0, 0.06), 0.09],
+        albedo: [0.09 + rng.range(0, 0.03), 0.145 + rng.range(0, 0.045), 0.06],
         spin: 0,
       });
     }

@@ -36,7 +36,14 @@ async function boot() {
     return;
   }
 
-  const device = await createDevice(canvas, caps);
+  // Quality tiers, and the first thing they buy or spend is the shadow pass:
+  // it doubles the geometry submitted per frame, which is nothing on a GPU and
+  // the difference between 30 fps and 14 on a software rasteriser. `?off=shadows`
+  // switches it off anywhere, which is also how you bisect a lighting bug.
+  const device = await createDevice(canvas, caps, {
+    shadows: !off.has('shadows') && tier !== 'low',
+    shadowSize: tier === 'high' ? 2048 : 1024,
+  });
   const world = createWorld({
     seed: Number(params.get('seed')) || 1,
     hour: params.has('time') ? Number(params.get('time')) : 9,

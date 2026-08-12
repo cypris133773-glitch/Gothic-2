@@ -30,6 +30,20 @@
   <p id="talk-hint">1–9 to speak · T to train · Esc to end</p>
 </div>
 
+<!-- The character's own screens: what he is carrying, what he has been asked to
+     do, and what he has spent his learning points on. One panel, three tabs,
+     because they are read together — "can I afford that sword yet" is a
+     question about the inventory and the sheet at the same time. -->
+<div id="book" hidden>
+  <nav id="book-tabs">
+    <button data-tab="sheet">Character <b>C</b></button>
+    <button data-tab="pack">Pack <b>I</b></button>
+    <button data-tab="log">Log <b>J</b></button>
+  </nav>
+  <div id="book-body"></div>
+  <p id="book-hint"></p>
+</div>
+
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

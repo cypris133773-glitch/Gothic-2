@@ -75,6 +75,10 @@ export const ITEMS = {
   lockpick: { kind: KIND.MISC, name: 'Lockpick', value: 12 },
   ore_crate: { kind: KIND.MISC, name: 'Crate of blackore', value: 0, quest: true, unsellable: true },
   bandit_letter: { kind: KIND.MISC, name: 'Water-stained letter', value: 0, quest: true, unsellable: true },
+  // The letter you carry past the gate guards. It is a quest item and it is
+  // sealed: the design of the errand is that you never learn what it says,
+  // which is what makes carrying it an act of trust rather than of curiosity.
+  sealed_letter: { kind: KIND.MISC, name: 'Sealed letter', value: 0, quest: true, unsellable: true },
 };
 
 /** What a creature leaves behind. `needs` entries only drop if you know how. */
@@ -104,6 +108,17 @@ export const TRADERS = {
     gold: 420,
     stock: [['hunters_bow', 1], ['healing_draught', 4]],
     buys: [KIND.TROPHY, KIND.POTION],
+  },
+  yorne_tavern: {
+    gold: 260,
+    stock: [['healing_draught', 6], ['lockpick', 3]],
+    // A publican buys what he can sell over the bar, and hides.
+    buys: [KIND.POTION, KIND.TROPHY],
+  },
+  vessa_alchemist: {
+    gold: 1400,
+    stock: [['healing_draught', 8], ['strong_draught', 3]],
+    buys: [KIND.POTION, KIND.TROPHY, KIND.MISC],
   },
 };
 

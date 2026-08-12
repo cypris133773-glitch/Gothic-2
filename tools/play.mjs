@@ -248,10 +248,54 @@ async function main() {
     ok('a chosen line is answered', !!said.reply, said.reply ? said.reply.slice(0, 48) + '…' : '');
     ok('and it changed the world', said.flags.includes('met:harl'));
 
+    // Take the job, so there is something for the quest log to have in it.
+    await page.keyDown('Digit1'); await page.keyUp('Digit1');
+    await sleep(150);
+    const took = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a second line takes the job', took.flags.includes('quest:q_ore:told'),
+      took.reply ? took.reply.slice(0, 44) + '…' : 'no reply');
+
     await page.keyDown('Escape'); await page.keyUp('Escape');
     await sleep(120);
     const closed = await page.evaluate('window.GRIMWARD.probeState()');
     ok('Escape ends the conversation', !closed.talking);
+
+    // --- the character's book, through real key events ----------------------
+    await page.keyDown('KeyJ'); await page.keyUp('KeyJ');
+    await sleep(150);
+    const logOpen = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('J opens the quest log', logOpen.book === 'log', `tab ${logOpen.book}`);
+    ok('and the ore job is in it', logOpen.quests.some((q) => q.startsWith('q_ore:')),
+      logOpen.quests.join(', ') || 'empty');
+
+    await page.keyDown('KeyI'); await page.keyUp('KeyI');
+    await sleep(150);
+    const packOpen = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('I switches to the pack', packOpen.book === 'pack', `tab ${packOpen.book}`);
+    ok('and it lists what he is carrying', packOpen.items.length >= 3, packOpen.items.join(' '));
+
+    // Number keys act on the pack: the first row is the branch he is holding,
+    // so pressing it puts the weapon away. Real keys, real inventory.
+    const armedBefore = packOpen.weapon;
+    await page.keyDown('Digit1'); await page.keyUp('Digit1');
+    await sleep(150);
+    const acted = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a number key acts on the pack', acted.weapon !== armedBefore || acted.armour !== packOpen.armour,
+      `weapon ${armedBefore} → ${acted.weapon}, armour ${packOpen.armour} → ${acted.armour}`);
+
+    await page.keyDown('KeyC'); await page.keyUp('KeyC');
+    await sleep(150);
+    const sheetOpen = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('C switches to the character sheet', sheetOpen.book === 'sheet', `tab ${sheetOpen.book}`);
+    ok('and it knows which chapter this is', sheetOpen.chapter === 1, `chapter ${sheetOpen.chapter}`);
+
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(120);
+    const bookShut = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('Escape closes the book', !bookShut.book);
+
+    // The gate of the upper quarter is shut, and it is shut with geometry.
+    ok('the upper gate starts closed', bookShut.doors.upper === false);
 
     // --- saving, through the real game -------------------------------------
     const beforeSave = await page.evaluate('window.GRIMWARD.probeState()');

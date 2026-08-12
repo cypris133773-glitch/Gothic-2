@@ -456,3 +456,63 @@ export function buildCleftGate(x, z, ground) {
   out.push({ pos: [x + 3.4, ground + 0.2, z + 4], yaw: 0.6, pitch: 0, scale: [1.8, 0.35, 1.8], albedo: [0.09, 0.08, 0.07], tex: MAT.ROCK });
   return out;
 }
+
+/**
+ * A closed door: two leaves in an opening, with a collider.
+ *
+ * This is what makes the upper gate a *door in the world* rather than a
+ * conversation that happens to precede an invisible wall. It is a real box in
+ * the obstacle list, and opening it means taking it out of that list — so the
+ * moment the guard steps aside is the moment the geometry changes, and nothing
+ * about the block is implied or scripted.
+ */
+export function buildDoor(x, z, ground, yaw, width = 5.0, height = 4.4) {
+  const oak = [0.17, 0.12, 0.07], iron = [0.14, 0.14, 0.15];
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const put = (lx, ly, sx, sh, sz, albedo, tex, extra = {}) => ({
+    pos: [x + lx * cy, ground + ly, z - lx * sy],
+    yaw, pitch: 0, scale: [sx, sh, sz], albedo, tex, ...extra,
+  });
+  const out = [];
+  for (const side of [-1, 1]) {
+    out.push(put(side * width / 4, height / 2, width / 2 - 0.06, height, 0.34, oak, MAT.PLANK));
+    // Iron bands, because a plank rectangle reads as a fence panel.
+    for (const h of [height * 0.28, height * 0.72]) {
+      out.push(put(side * width / 4, h, width / 2 - 0.02, 0.16, 0.40, iron, MAT.STEEL));
+    }
+  }
+  // One collider across the whole opening rather than one per leaf: two boxes
+  // meeting in the middle leave a seam a 0.36 m capsule can be squeezed into.
+  out.push(put(0, height / 2, width, height, 0.44, oak, MAT.PLANK, { box: [width, 0.44], invisible: true }));
+  return out;
+}
+
+/**
+ * A stack of crates against a wall — the fourth way into the upper quarter.
+ *
+ * It is climbable by anyone; what it is not is *tall enough*. The top crate
+ * sits about three metres up against a five-metre wall, which a standing jump
+ * does not clear and an acrobat's does. The skill changes which geometry you
+ * can stand on and nothing else, which is the honest version of a stat gate.
+ */
+export function buildCrateStack(x, z, ground, yaw = 0) {
+  const wood = [0.28, 0.20, 0.11], dark = [0.22, 0.16, 0.09];
+  const out = [];
+  const rows = [
+    [0, 0, 1.5], [1.5, 0, 1.5], [0, 1.5, 1.5], [0.75, 1.5, 1.4], [0.4, 2.9, 1.3],
+  ];
+  for (let i = 0; i < rows.length; i++) {
+    const [lx, ly, size] = rows[i];
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    out.push({
+      pos: [x + lx * cy, ground + ly + size / 2, z - lx * sy],
+      yaw: yaw + i * 0.11, pitch: 0,
+      scale: [size, size, size],
+      albedo: i % 2 ? dark : wood, tex: MAT.PLANK,
+      // Boxes, not circles: you stand on the top of a crate, and a circle round
+      // one would let you stand on air at its corners.
+      box: [size, size],
+    });
+  }
+  return out;
+}

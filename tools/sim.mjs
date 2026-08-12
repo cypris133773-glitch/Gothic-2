@@ -4,12 +4,14 @@
  *
  *   node tools/sim.mjs [--seeds=8] [--verbose]
  *
- * The golden path: talk to the smith, take the ore job, walk the north road,
- * find the crates, walk back, get paid, and use the smith's word to get into
- * the Watch. It is the whole of the game that currently exists, played end to
- * end, and it is the only thing that can prove the world is completable —
- * §13.2 of the brief, and the reason the entire simulation was built to run
- * without a renderer.
+ * The golden path: talk to the smith, take the ore job, buy a lesson with the
+ * starting purse, walk out of the land gate and down the farm road, find the
+ * crates, walk back, get paid, buy the second lesson with the reward, cross the
+ * city to the barracks, and use the smith's word plus twenty per cent of a
+ * sword to swear to the Watch — which begins chapter two and changes the
+ * island. It is the spine of the game played end to end, and it is the only
+ * thing that can prove the world is completable — §13.2 of the brief, and the
+ * reason the entire simulation was built to run without a renderer.
  *
  * The bot steers; it does not teleport and it does not call world internals to
  * make anything happen beyond the two acts a player performs with a key (talk,
@@ -111,7 +113,7 @@ export function goldenPath(seed, { maxSeconds = 900, verbose = false } = {}) {
   }
 
   const npc = (id) => world.people.find((p) => p.id === id);
-  const smith = npc('npc3'), guard = npc('npc0');
+  const smith = npc('npc3'), aldric = npc('npc9');
   const CRATES = [world.crates[0].pos[0], world.crates[0].pos[2]];
   const GATE = world.gates.land, APRON = world.gates.apron;
 
@@ -141,13 +143,35 @@ export function goldenPath(seed, { maxSeconds = 900, verbose = false } = {}) {
           say('harl.ore_solved');
         }
       } },
-    { goal: 'meet the Watch', done: () => world.flags.has('watch:asked'),
+    // Twenty per cent of a swordsman is Aldric's price of entry, and one lesson
+    // from Harl is fifteen. The second lesson is what the bot goes back for —
+    // which is the game's own loop (earn, buy, qualify) played by something
+    // with no idea what a quest is.
+    { goal: 'buy the second lesson', done: () => world.character.skills.oneHanded >= 20,
+      act: () => {
+        if (walkVia('smith2', [[smith.pos[0], smith.pos[2]]], 1.6)) {
+          if (!world.dialogue.isOpen) world.talk();
+          if (say('harl.train') || world.openTrainer) { world.train(); world.dialogue.close(); }
+          legs.set('smith2', 0);
+        }
+      } },
+    { goal: 'reach the barracks', done: () => world.flags.has('met:aldric'),
       act: () => {
         world.dialogue.close();
-        if (walkTo(guard.pos[0], guard.pos[2], 1.6)) { if (!world.dialogue.isOpen) world.talk(); say('watch.greet') || say('watch.join_ask'); }
+        if (walkVia('barracks', [[6, 4], [8, -6], [aldric.pos[0], aldric.pos[2]]], 1.6)) {
+          world.talk(); say('aldric.greet');
+        }
       } },
+    { goal: 'ask to serve', done: () => world.flags.has('quest:q_watch:told'),
+      act: () => { if (!world.dialogue.isOpen) world.talk(); say('aldric.join_ask'); } },
+    { goal: 'be vouched for', done: () => world.flags.has('quest:q_watch:vouched'),
+      act: () => { if (!world.dialogue.isOpen) world.talk(); say('aldric.vouched'); } },
     { goal: 'join the Watch', done: () => world.character.guild === 'watch',
-      act: () => { if (!world.dialogue.isOpen) world.talk(); say('watch.join'); } },
+      act: () => { if (!world.dialogue.isOpen) world.talk(); say('aldric.join'); } },
+    // And the oath is what begins chapter two, which is the world changing
+    // under a player who has done nothing but errands.
+    { goal: 'see chapter two begin', done: () => world.chapter >= 2,
+      act: () => { world.dialogue.close(); } },
   ];
 
   let step = 0;

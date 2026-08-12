@@ -12,7 +12,7 @@ import {
 } from './terrain.js';
 import {
   buildHouse, buildWell, buildStall, buildWall, buildFarm, buildTower,
-  buildLighthouse, buildMonastery, buildCleftGate,
+  buildLighthouse, buildMonastery, buildCleftGate, buildDoor, buildCrateStack,
 } from './buildings.js';
 import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
@@ -32,6 +32,8 @@ import {
   createTrader, buy, sell, listing,
 } from '../game/inventory.js';
 import { DROPS, ITEMS, item } from '../data/items.js';
+import { QUESTS, entry as questEntry } from '../data/quests.js';
+import { CHAPTERS, LAST_CHAPTER, readyFor } from '../game/chapters.js';
 
 const ticksToSeconds = (t) => t / 60;
 
@@ -141,6 +143,16 @@ function buildCity(terrain, seed) {
     }));
   }
 
+  // The crates against the west face of the inner wall: the fourth way up.
+  // They are three metres of stacked timber against a five-metre wall, put
+  // where a guard on the gate cannot see them, and nothing marks them out.
+  {
+    const a = Math.PI * 0.86;
+    const cx2 = u.at[0] + Math.cos(a) * (u.rx + 2.4);
+    const cz2 = u.at[1] + Math.sin(a) * (u.rz + 2.4);
+    boxes.push(...buildCrateStack(cx2, cz2, g(cx2, cz2), a + Math.PI / 2));
+  }
+
   // The market square: the well people stand around, and two stalls.
   const [sx, sz] = CITY.square;
   boxes.push(...buildWell(sx, sz, g(sx, sz)));
@@ -238,7 +250,21 @@ function makePeople(terrain, seed) {
     { kit: 'villager', at: [-17.5, -2.0], look: [-26, 0], route: [[-17.5, -6.0], [-17.5, 3.0]], speed: 1.2 },
     // The barracks yard.
     { kit: 'guard', at: [10.0, -8.0], look: [18, -7], route: null },
+    // npc8 — Yorne, outside his tavern in the harbour quarter. He is the first
+    // of the four ways past the upper gate and he is deliberately the one you
+    // find by wandering rather than by being sent.
     { kit: 'villager', at: [-7.0, -14.5], look: [-12, -16], route: null },
+    // npc9 — Captain Aldric, in the barracks. The Watch's door.
+    { kit: 'knight', at: [11.5, -4.0], look: [18, -7], route: null },
+    // npc10 — Vessa, the alchemist, inside the upper quarter. You cannot reach
+    // her without solving the gate, which is the point of putting her there.
+    { kit: 'villager', at: [-8.0, -21.0], look: [0, -22], route: null },
+    // npc11 — Brother Kelm, on the monastery shelf. The Chapter's door.
+    { kit: 'villager', at: [-18, -104], look: [-18, -118], route: null },
+    // npc12 — Sarn, at Hulder's farm. The Freeblades' door, out past the road.
+    { kit: 'guard', at: [58, -78], look: [64, -84], route: null },
+    // npc13 — Ossric, at the foot of his tower. The plot.
+    { kit: 'villager', at: [122, -98], look: [122, -104], route: null },
   ];
 
   return spec.map((s, i) => {
@@ -402,8 +428,36 @@ export function createWorld(opts = {}) {
     }
   }
 
+  // --- doors ------------------------------------------------------------------
+  //
+  // A door is geometry that can be removed from the world, and that is the
+  // whole of the mechanism: the gate of the upper quarter is shut because there
+  // is a box in the opening, and it opens because the box comes out of the
+  // scene and out of the obstacle list. Nothing anywhere reads "the player may
+  // not go north".
+  const doors = [];
+  if (!opts.lineup && opts.town !== false) {
+    const u = CITY.upper;
+    const ug = gatePoint(u.at[0], u.at[1], u.rx, u.rz, u.gate);
+    doors.push({
+      name: 'upper',
+      // The leaves face along the wall's tangent at the gate, which for a gate
+      // on the +Z side means across X.
+      boxes: buildDoor(ug[0], ug[1], terrain.heightAt(ug[0], ug[1]), Math.PI / 2, 5.4, 4.8),
+      opensOn: 'pass:upper',
+    });
+    const cl = PLACES.cleft.at;
+    doors.push({
+      name: 'cleft',
+      boxes: [],                 // the Cleft's barricade is scenery; see below
+      opensOn: 'pass:cleft',
+      at: cl,
+    });
+  }
+  const doorBoxes = () => doors.filter((d) => !d.open).flatMap((d) => d.boxes);
+
   // Everything the character controller can bump into.
-  const obstacles = [...props, ...town, ...crates].filter((b) => b.radius || b.box);
+  const obstacles = [...props, ...town, ...crates, ...doorBoxes()].filter((b) => b.radius || b.box);
 
   // Nobody starts inside a wall. The city is placed by hand and the props are
   // placed by a generator, so sooner or later one lands on the other; shoving
@@ -423,7 +477,7 @@ export function createWorld(opts = {}) {
   // Scene buffers, reused every frame: the scene is a *view* of the simulation
   // and rebuilding it must not allocate (§8.1.4). The static half never changes;
   // the character half is refilled in place by the rig.
-  const staticBoxes = [...props, ...town, ...crates].filter((b) => !b.invisible);
+  const staticBoxes = [...props, ...town, ...crates, ...doorBoxes()].filter((b) => !b.invisible);
   const boxes = [];
   const playerParts = [];
   const peopleParts = people.map(() => []);
@@ -472,8 +526,113 @@ export function createWorld(opts = {}) {
 
     setQuest(quest, stage) {
       quests.set(quest, stage);
+      // Both the *current* stage and every stage ever reached are recorded: the
+      // map gives the log something to display, the flags give conditions
+      // something to read, and a conversation that wants to know whether you
+      // once carried the letter can ask even after you have handed it over.
       flags.add(`quest:${quest}:${stage}`);
-      world.log.push(`Quest ${quest}: ${stage}`);
+      const q = QUESTS[quest];
+      world.log.push(q ? `${q.title} — ${q.stages[stage] || stage}` : `Quest ${quest}: ${stage}`);
+      return stage;
+    },
+
+    /**
+     * The quest log, as the UI shows it: open ones first, in the order they
+     * were taken, with the finished ones after.
+     */
+    questLog() {
+      const rows = [];
+      for (const [id, stage] of quests) {
+        const e = questEntry(id, stage);
+        if (e) rows.push(e);
+      }
+      return rows.sort((a, b) => (a.finished ? 1 : 0) - (b.finished ? 1 : 0));
+    },
+
+    // --- chapters --------------------------------------------------------------
+
+    /**
+     * Begin a chapter. One-way, explicit, and refused if its conditions are not
+     * met — a chapter that arrives as a side effect is a chapter the player
+     * cannot understand, and one that arrives early breaks every difficulty
+     * assumption behind it.
+     */
+    setChapter(n, opts2 = {}) {
+      if (n <= world.chapter && !opts2.force) return { ok: false, why: `already in chapter ${world.chapter}` };
+      if (n > LAST_CHAPTER) return { ok: false, why: `there is no chapter ${n}` };
+      if (!opts2.force) {
+        const ready = readyFor(world, n);
+        if (!ready.ok) return ready;
+      }
+      world.chapter = n;
+      world.applyChapter(n);
+      const c = CHAPTERS[n];
+      if (!opts2.silent) world.log.push(`Chapter ${n}: ${c.title}. ${c.blurb}`);
+      return { ok: true, chapter: n };
+    },
+
+    /**
+     * Make the world look like the chapter says it should.
+     *
+     * This is the part that matters: a chapter is a world edit, not a number.
+     * It is idempotent and it is called on load as well as on advance, because
+     * a save restored into a fresh chapter-one island would otherwise put the
+     * player in chapter three on an island that had never heard of it.
+     */
+    applyChapter(n) {
+      const c = CHAPTERS[n] || CHAPTERS[1];
+
+      // Doors the chapter opens regardless of what the player did.
+      for (const d of doors) if (c.doors.includes(d.name)) world.openDoor(d.name);
+
+      // The far ring: what has moved in past the roads while you were busy.
+      // Seeded off the chapter as well as the world, so the same chapter of the
+      // same seed always brings the same things.
+      const want = c.hardRing;
+      const have = beasts.filter((b) => b.ring).length;
+      if (want > have) {
+        const crng = makeRng(seed * 7919 + n * 104729);
+        for (let i = 0; i < want * 60 && beasts.filter((b) => b.ring).length < want; i++) {
+          const a = crng.range(0, Math.PI * 2), r = crng.range(96, 190);
+          const x = Math.cos(a) * r, z = Math.sin(a) * r;
+          if (terrain.heightAt(x, z) < 1.2 || terrain.slopeAt(x, z) > 0.5) continue;
+          if (terrain.padFactor(x, z) > 0.3) continue;
+          const b = createBeast(crng.chance(0.45) ? 'wolf' : 'boar', x, z, terrain, crng);
+          b.ring = n;
+          // The far ring is not the same wolf further away. It hits harder and
+          // it takes more, because chapter three's job is to make the road you
+          // already know worth being careful on again.
+          b.maxHp = Math.round(b.maxHp * (1 + n * 0.22));
+          b.hp = b.maxHp;
+          b.str = Math.round((b.str || 10) * (1 + n * 0.18));
+          beasts.push(b);
+          beastParts.push([]);
+        }
+      }
+
+      // A trader's stock is a chapter-boundary thing, never a timer (§6.7).
+      traders.clear();
+      return n;
+    },
+
+    /** Take a door out of the world. Idempotent; the geometry only goes once. */
+    openDoor(name) {
+      const d = doors.find((x) => x.name === name);
+      if (!d || d.open) return false;
+      d.open = true;
+      for (const box of d.boxes) {
+        const i = obstacles.indexOf(box);
+        if (i >= 0) obstacles.splice(i, 1);
+        const j = staticBoxes.indexOf(box);
+        if (j >= 0) staticBoxes.splice(j, 1);
+      }
+      world.log.push(`The ${name} gate is open.`);
+      return true;
+    },
+
+    doorOpen(name) {
+      const d = doors.find((x) => x.name === name);
+      return !d || !!d.open;
     },
 
     joinGuild(guild) {
@@ -564,6 +723,54 @@ export function createWorld(opts = {}) {
       if (quests.get('q_wolves') === 'told') {
         const dead = beasts.filter((b) => b.kind === 'wolf' && b.state === S.DEAD).length;
         if (dead >= 4) world.setQuest('q_wolves', 'cleared');
+      }
+
+      // Carrying the letter is a state of the world, not a thing you are told.
+      if (quests.get('q_letter') === 'told' && has(inventory, 'sealed_letter')) {
+        world.setQuest('q_letter', 'carried');
+      }
+
+      // The gate opens the moment you have a reason to be let through, however
+      // you got one. `pass:upper` is set by four different conversations and by
+      // the crates; the door does not care which.
+      if (flags.has('pass:upper')) world.openDoor('upper');
+
+      // The fourth way: you are standing inside the upper quarter and nobody
+      // opened the gate for you. There is exactly one place the wall can be
+      // cleared from, and only with the jump acrobatics buys — so getting here
+      // is proof, and the flag is the world noticing rather than granting.
+      if (!flags.has('pass:upper') && !world.doorOpen('upper')) {
+        const u = CITY.upper;
+        const dx = (player.pos[0] - u.at[0]) / u.rx, dz = (player.pos[2] - u.at[1]) / u.rz;
+        if (Math.hypot(dx, dz) < 0.94 && player.onGround) {
+          flags.add('pass:upper');
+          world.setQuest('q_upper', 'climbed');
+          world.awardXp(250, 'quest');
+        }
+      }
+      if (flags.has('pass:upper') && quests.get('q_upper') !== 'done') {
+        const how = quests.get('q_upper');
+        if (how && how !== 'refused') world.setQuest('q_upper', 'done');
+      }
+
+      // The Cleft is walked, not talked about. Standing in the mouth of the pass
+      // is what finishes it, which is the same rule the crates follow: a place
+      // in the world, reached on foot.
+      if (flags.has('quest:q_cleft:told') && quests.get('q_cleft') !== 'done') {
+        const c2 = PLACES.cleft.at;
+        if (Math.hypot(player.pos[0] - c2[0], player.pos[2] - c2[1]) < PLACES.cleft.r) {
+          world.setQuest('q_cleft', 'done');
+          world.awardXp(800, 'quest');
+        }
+      }
+
+      // Chapters advance when their conditions come true and never otherwise.
+      // Checked here rather than fired from a conversation so that every route
+      // into a chapter goes through the same door — including the three
+      // different guilds, which is the whole point of having three.
+      for (let n = world.chapter + 1; n <= LAST_CHAPTER; n++) {
+        if (!readyFor(world, n).ok) break;
+        world.setChapter(n);
       }
     },
 

@@ -12,6 +12,9 @@ import { createWorld } from './world/world.js';
 import { createOverlay, FrameTimer, log } from './core/log.js';
 import { STATE_NAME } from './game/combat.js';
 import { createStorage } from './core/save.js';
+import { SKILLS, xpToNext, lpForAttribute } from './game/character.js';
+import { CHAPTERS } from './game/chapters.js';
+import { ITEMS } from './data/items.js';
 
 const TICK_MS = 1000 / 60;          // the simulation is 60 Hz, always
 const MAX_CATCHUP_MS = 250;         // a backgrounded tab must not simulate four minutes on return
@@ -102,6 +105,12 @@ async function boot() {
       skills: { ...world.character.skills }, guild: world.character.guild,
       flags: [...world.flags],
       trainer: world.openTrainer ? world.openTrainer.skill : null,
+      chapter: world.chapter,
+      quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
+      items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
+      weapon: world.inventory.weapon, armour: world.inventory.armour,
+      book: tab,
+      doors: { upper: world.doorOpen('upper') },
       beasts: world.beasts.map((b) => ({ kind: b.kind, hp: b.hp, state: b.state,
         dist: +Math.hypot(b.pos[0] - world.player.pos[0], b.pos[2] - world.player.pos[2]).toFixed(2) })),
       clock: world.clock.hhmm, ticks: world.ticks, frames: api.frames,
@@ -166,8 +175,173 @@ async function boot() {
     }));
   }
 
+  // --- the character's book: sheet, pack and quest log ------------------------
+  //
+  // Three screens behind one panel, because they are read together: "can I
+  // afford that sword yet" is a question about the pack and the sheet at the
+  // same time, and a player who has to close one to check the other stops
+  // checking. Number keys act on the highlighted list, which is the whole of
+  // the interaction — no drag, no pointer, nothing that needs a mouse.
+  const bookEl = document.getElementById('book');
+  const bodyEl = document.getElementById('book-body');
+  const hintEl = document.getElementById('book-hint');
+  const tabsEl = document.getElementById('book-tabs');
+  let tab = null;                     // null = closed
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  /** A numbered row: key, name, and a right-hand note. */
+  const row = (i, name, note, cls = '') => {
+    const li = el('li', cls);
+    li.append(el('span', 'k', i != null ? String(i) : ''), el('span', 'n', name), el('span', 'm', note || ''));
+    return li;
+  };
+
+  /** What the number keys act on right now, so the handler stays dumb. */
+  let actions = [];
+
+  function renderSheet() {
+    const c = world.character;
+    const f = world.player.fighter;
+    const out = [];
+    out.push(el('h3', null, 'The man'));
+    const dl = el('dl');
+    const put = (k, v) => { dl.append(el('dt', null, k), el('dd', null, v)); };
+    put('Name', c.name);
+    put('Order', c.guild ? ({ watch: 'The Watch', ember: 'The Ember Chapter', freeblade: 'The Freeblades' })[c.guild] : 'sworn to nobody');
+    put('Chapter', `${world.chapter} — ${CHAPTERS[world.chapter].title}`);
+    put('Level', `${c.level}   (${xpToNext(c)} xp to the next)`);
+    put('Learning points', String(c.lp));
+    put('Gold', String(c.gold));
+    out.push(dl);
+
+    out.push(el('h3', null, 'Attributes  —  press the number to raise one'));
+    actions = [];
+    const ul = el('ul');
+    for (const [i, attr] of ['str', 'dex', 'mana'].entries()) {
+      const cost = lpForAttribute(c[attr]);
+      const label = { str: 'Strength', dex: 'Dexterity', mana: 'Mana' }[attr];
+      const can = c.lp >= cost;
+      ul.append(row(i + 1, `${label}  ${c[attr]}`, `${cost} LP`, can ? 'on' : 'off'));
+      actions.push({ do: () => world.raise(attr, 1) });
+    }
+    out.push(ul);
+
+    out.push(el('h3', null, 'Skills'));
+    const su = el('ul');
+    for (const [key, def] of Object.entries(SKILLS)) {
+      if (def.kind === 'percent') {
+        const v = c.skills[key] || 0;
+        if (!v && key !== 'oneHanded') continue;      // only what he has touched
+        su.append(row(null, def.label, `${v}%`, v ? 'on' : 'off'));
+      } else if (c.flags.has(`skill:${key}`) || world.flags.has(`skill:${key}`)) {
+        su.append(row(null, def.label, 'known', 'on'));
+      }
+    }
+    out.push(su);
+
+    out.push(el('h3', null, 'In hand'));
+    const hl = el('dl');
+    hl.append(el('dt', null, 'Weapon'), el('dd', null, world.inventory.weapon ? ITEMS[world.inventory.weapon].name : 'empty hands'));
+    hl.append(el('dt', null, 'Armour'), el('dd', null, world.inventory.armour ? ITEMS[world.inventory.armour].name : 'nothing'));
+    hl.append(el('dt', null, 'Health'), el('dd', null, `${f.hp} / ${c.maxHp}`));
+    out.push(hl);
+
+    hintEl.textContent = '1–3 raise an attribute · C/I/J switch · Esc closes';
+    bodyEl.replaceChildren(...out);
+  }
+
+  function renderPack() {
+    const items = world.items();
+    actions = [];
+    const out = [];
+    if (!items.length) out.push(el('p', 'empty', 'You are carrying nothing at all.'));
+    let n = 0;
+    for (const kind of ['weapon', 'armour', 'potion', 'trophy', 'misc']) {
+      const group = items.filter((it) => it.kind === kind);
+      if (!group.length) continue;
+      out.push(el('h3', null, { weapon: 'Weapons', armour: 'Armour', potion: 'Draughts', trophy: 'Trophies', misc: 'Other' }[kind]));
+      const ul = el('ul');
+      for (const it of group) {
+        n++;
+        const req = it.str ? `needs ${it.str} str` : it.dex ? `needs ${it.dex} dex` : '';
+        const note = [it.n > 1 ? `×${it.n}` : '', it.equipped ? 'in hand' : '', req,
+          it.value ? `${it.value}g` : ''].filter(Boolean).join('  ');
+        ul.append(row(n <= 9 ? n : null, it.name, note, it.equipped ? 'on' : ''));
+        if (n <= 9) {
+          actions.push({
+            do: () => (kind === 'potion' ? world.drink(it.id)
+              : it.equipped ? world.unequip(kind === 'weapon' ? 'weapon' : 'armour')
+                : world.equip(it.id)),
+          });
+        }
+      }
+      out.push(ul);
+    }
+    hintEl.textContent = '1–9 equip, unequip or drink · C/I/J switch · Esc closes';
+    bodyEl.replaceChildren(...out);
+  }
+
+  function renderLog() {
+    const rows = world.questLog();
+    actions = [];
+    const out = [];
+    if (!rows.length) out.push(el('p', 'empty', 'Nobody has asked you for anything yet.'));
+    const open = rows.filter((r) => !r.finished);
+    const shut = rows.filter((r) => r.finished);
+    if (open.length) {
+      out.push(el('h3', null, 'What is being asked of you'));
+      const ul = el('ul');
+      for (const r of open) {
+        ul.append(row(null, r.title, `${r.step}/${r.steps}`));
+        const p2 = el('p', 'q', r.text);
+        ul.append(p2);
+      }
+      out.push(ul);
+    }
+    if (shut.length) {
+      out.push(el('h3', null, 'Finished, one way or another'));
+      const ul = el('ul');
+      for (const r of shut) ul.append(row(null, r.title, r.stage, 'done'));
+      out.push(ul);
+    }
+    hintEl.textContent = 'C/I/J switch · Esc closes';
+    bodyEl.replaceChildren(...out);
+  }
+
+  function renderBook() {
+    if (!tab) { bookEl.hidden = true; actions = []; return; }
+    bookEl.hidden = false;
+    for (const b of tabsEl.querySelectorAll('button')) {
+      b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+    }
+    ({ sheet: renderSheet, pack: renderPack, log: renderLog })[tab]();
+  }
+  const openBook = (which) => { tab = tab === which ? null : which; renderBook(); };
+  api.book = { open: openBook, get tab() { return tab; }, render: renderBook };
+
   addEventListener('keydown', (e) => {
     if (e.code === 'F3') { overlay.toggle(); return; }
+
+    // The book takes the number keys while it is up, and a conversation takes
+    // them back — you cannot equip a sword mid-sentence, which is deliberate.
+    if (tab && !world.dialogue.isOpen) {
+      if (e.code === 'Escape') { tab = null; renderBook(); return; }
+      if (e.code === 'KeyC') { openBook('sheet'); return; }
+      if (e.code === 'KeyI') { openBook('pack'); return; }
+      if (e.code === 'KeyJ') { openBook('log'); return; }
+      const n = Number(e.key);
+      if (n >= 1 && n <= 9 && actions[n - 1]) {
+        const r = actions[n - 1].do();
+        if (r && r.why && !r.ok) log(r.why);
+        renderBook();
+      }
+      return;
+    }
 
     if (world.dialogue.isOpen) {
       if (e.code === 'Escape') { world.dialogue.close(); renderTalk(); return; }
@@ -180,8 +354,16 @@ async function boot() {
     // if there is nobody there, which is the correct amount of feedback for a
     // key pressed at an empty street.
     if (e.code === 'KeyE') { if (world.talk()) renderTalk(); }
+    if (e.code === 'KeyC') { openBook('sheet'); return; }
+    if (e.code === 'KeyI') { openBook('pack'); return; }
+    if (e.code === 'KeyJ') { openBook('log'); return; }
     if (e.code === 'F5') { e.preventDefault(); save('manual'); }
     if (e.code === 'F9') { e.preventDefault(); load('manual'); }
+  });
+
+  tabsEl.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (b) { tab = b.dataset.tab; renderBook(); }
   });
 
   const sizeFor = () => {

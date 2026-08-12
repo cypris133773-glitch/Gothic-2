@@ -49,3 +49,49 @@ html, body {
 #talk-options li { padding: 3px 0; color: #b9ad92; }
 #talk-options li b { color: #c8a45c; margin-right: 8px; }
 #talk-hint { margin-top: 12px; font-size: 12px; color: #6e6552; }
+
+/* The character's book: sheet, pack and quest log.
+   Same parchment as the conversation panel, because they are the same voice —
+   a UI that switches from ink to glass halfway through tells the player the
+   two halves were made by different people. */
+#book {
+  position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(46rem, 94vw); max-height: 80vh; display: flex; flex-direction: column;
+  background: rgba(14, 12, 9, 0.95);
+  border: 1px solid #4a3f2c; border-radius: 3px;
+  box-shadow: 0 10px 50px rgba(0, 0, 0, 0.7);
+  color: #d8cbae;
+}
+#book[hidden] { display: none; }
+
+#book-tabs { display: flex; gap: 2px; padding: 10px 14px 0; border-bottom: 1px solid #33291c; }
+#book-tabs button {
+  appearance: none; background: none; border: 0; border-bottom: 2px solid transparent;
+  padding: 8px 14px; font: inherit; font-size: 13px; color: #8a8171; cursor: pointer;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+#book-tabs button b { color: #6e6552; margin-left: 8px; font-weight: 400; }
+#book-tabs button[aria-selected="true"] { color: #e8d6a8; border-bottom-color: #c8a45c; }
+#book-tabs button[aria-selected="true"] b { color: #c8a45c; }
+
+#book-body { overflow-y: auto; padding: 16px 20px 4px; font-size: 14px; }
+#book-body h3 {
+  font-size: 11px; font-weight: 600; letter-spacing: 0.10em; text-transform: uppercase;
+  color: #c8a45c; margin: 14px 0 6px;
+}
+#book-body h3:first-child { margin-top: 0; }
+#book-body dl { display: grid; grid-template-columns: 12rem 1fr; row-gap: 3px; }
+#book-body dt { color: #8a8171; }
+#book-body dd { color: #e8dcc0; }
+#book-body ul { list-style: none; }
+#book-body li { padding: 4px 0; border-bottom: 1px solid #1e1913; display: flex; gap: 10px; }
+#book-body li:last-child { border-bottom: 0; }
+#book-body li .k { width: 2ch; color: #c8a45c; flex: none; }
+#book-body li .n { flex: 1; color: #e8dcc0; }
+#book-body li .m { color: #8a8171; font-size: 12px; text-align: right; }
+#book-body li.off .n { color: #6e6552; }
+#book-body li.on .n { color: #9ad07a; }
+#book-body li.done .n { color: #6e6552; text-decoration: line-through; }
+#book-body p.q { color: #b9ad92; font-size: 13px; padding: 0 0 6px 3ch; }
+#book-body p.empty { color: #6e6552; font-style: italic; }
+#book-hint { padding: 10px 20px 14px; font-size: 12px; color: #6e6552; border-top: 1px solid #33291c; }

@@ -94,6 +94,12 @@ export function restore(world, data) {
   world.clock.day = d.clock.day;
   world.clock.minutes = d.clock.minutes;
   world.chapter = d.chapter ?? 1;
+  // A chapter is a world edit, so a save from chapter three restored into a
+  // freshly built chapter-one island has to *replay* that edit before anything
+  // else is put back. It comes first because the extra creatures a chapter adds
+  // are appended to the beast list, and the beast records below are stored by
+  // index into that list.
+  if (world.applyChapter) world.applyChapter(world.chapter);
 
   world.player.pos.set(d.player.pos);
   world.player.yaw = d.player.yaw;
@@ -112,6 +118,10 @@ export function restore(world, data) {
 
   world.flags.clear();
   for (const f of d.flags) world.flags.add(f);
+  // Doors are not saved: which ones stand open is entirely decided by the flags
+  // and the chapter, both of which are. Storing the door state as well would be
+  // a second source of truth for the same fact, and the two would drift.
+  if (world.openDoor && world.flags.has('pass:upper')) world.openDoor('upper');
   // Skill flags live on the character as well as in the world's flag set.
   c.flags = new Set(d.flags.filter((f) => f.startsWith('skill:')));
 

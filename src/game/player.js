@@ -22,6 +22,12 @@ export const ACCEL = 26;              // m/s² toward the target velocity
 export const FRICTION = 34;           // m/s² against it when there is no input
 export const GRAVITY = -22;           // heavier than earth, which reads better
 export const JUMP_SPEED = 6.4;
+// What acrobatics buys, and the only thing it buys: a jump you can reach the
+// top of a stack of crates with. 6.4 m/s clears about 0.93 m; 8.1 clears about
+// 1.49. That difference is the whole of the fourth way into the upper quarter —
+// a skill bought with learning points changing which geometry you can stand on,
+// rather than a percentage on a check nobody can see (pillar P3).
+export const ACROBAT_JUMP_SPEED = 8.1;
 export const MAX_SLOPE = 0.72;        // radians — about 41°, above which you slide
 export const RADIUS = 0.36;           // capsule radius, for collision
 export const HEIGHT = 1.8;
@@ -74,7 +80,7 @@ export function stepPlayer(p, intent, terrain, obstacles, dt) {
   p.vel[2] = approach(p.vel[2], targetZ, rate);
 
   if (intent.jump && p.onGround) {
-    p.vel[1] = JUMP_SPEED;
+    p.vel[1] = p.acrobat ? ACROBAT_JUMP_SPEED : JUMP_SPEED;
     p.onGround = false;
   }
   p.vel[1] += GRAVITY * dt;

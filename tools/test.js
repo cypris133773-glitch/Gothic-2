@@ -910,9 +910,20 @@ check('the city has walls, and the walls have gates you can walk through', () =>
     resolveObstacles(body, w.obstacles);
     return Math.hypot(body.pos[0] - x, body.pos[2] - z) < 0.05;
   };
-  for (const [name, at] of Object.entries(w.gates)) {
+  // The two ways in and out of the city are open to anybody. The gate of the
+  // upper quarter is *not*, and that asymmetry is the design: this test asserts
+  // both halves of it, because a change that quietly opened the upper gate
+  // would otherwise pass everything.
+  for (const name of ['land', 'harbour', 'apron', 'harbourApron']) {
+    const at = w.gates[name];
     assert(free(at[0], at[1]), `the ${name} gate is blocked`);
   }
+  assert(!free(w.gates.upper[0], w.gates.upper[1]),
+    'the gate of the upper quarter stood open to a stranger');
+  w.flags.add('pass:upper');
+  w.tick(1 / 60);
+  assert(free(w.gates.upper[0], w.gates.upper[1]),
+    'the gate of the upper quarter did not open for someone with a reason');
   // And the wall between the gates is not walk-through-able: sample the ring
   // away from both openings and count how much of it is solid.
   let solid = 0, tried = 0;
@@ -1051,7 +1062,7 @@ check('every flag a conversation writes is read by something', () => {
   // first version of this check only looked at `when` clauses and reported
   // three healthy flags as orphans.
   const written = new Set(), read = new Set();
-  for (const file of ['../src/world/world.js', '../src/game/quests.js']) {
+  for (const file of ['../src/world/world.js', '../src/game/chapters.js']) {
     let src = '';
     try { src = readFileSync(new URL(file, import.meta.url), 'utf8'); } catch { continue; }
     for (const m2 of src.matchAll(/'([a-z_]+:[a-z_:0-9]+)'/gi)) read.add(m2[1]);
@@ -1141,20 +1152,110 @@ check('training costs coin and learning points, and stops where the trainer stop
   assert(!w.train().ok, 'and did not refuse afterwards');
 });
 
+/** Stand in front of somebody and open their conversation. */
+function standAndTalk(w, npcId) {
+  const npc = w.people.find((p) => p.id === npcId);
+  assert(npc, `${npcId} is not in the world`);
+  w.player.pos[0] = npc.pos[0]; w.player.pos[2] = npc.pos[2] - 1.6;
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  w.player.yaw = 0;
+  return w.talk();
+}
+
 check('the guild door needs the whole chain, not just the asking', () => {
   const w = createWorld({ seed: 1, beasts: 0, props: 10 });
-  const guard = w.people.find((p) => p.id === 'npc0');
-  w.player.pos[0] = guard.pos[0]; w.player.pos[2] = guard.pos[2] - 1.6; w.player.yaw = 0;
-  w.talk();
-  const ids = () => w.dialogue.active.options.map((o) => o.id);
-  w.dialogue.say(ids().indexOf('watch.greet'));
-  w.dialogue.say(ids().indexOf('watch.join_ask'));
-  assert(!ids().includes('watch.join'), 'the Watch took him without the smith vouching');
+  const ids = () => (w.dialogue.active ? w.dialogue.active.options.map((o) => o.id) : []);
+  const say = (id) => {
+    const i = ids().indexOf(id);
+    assert(i >= 0, `"${id}" was not on offer — had ${ids().join(', ')}`);
+    return w.dialogue.say(i);
+  };
+
+  standAndTalk(w, 'npc9');                     // Captain Aldric, in the barracks
+  say('aldric.greet');
+  say('aldric.join_ask');
+  assert(!ids().includes('aldric.vouched'), 'the Watch vouched for him with nobody speaking');
+
+  // Somebody speaks for him — but he still cannot hold a blade.
   w.flags.add('harl:trusts');
-  w.talk();                                   // reopen with the new flag
-  assert(w.dialogue.active.options.some((o) => o.id === 'watch.join'), 'the door never opened');
-  w.dialogue.say(w.dialogue.active.options.findIndex((o) => o.id === 'watch.join'));
+  standAndTalk(w, 'npc9');
+  say('aldric.vouched');
+  assert(!ids().includes('aldric.join'), 'the Watch took a man who swings at ten per cent');
+  assert(ids().includes('aldric.join_unready'), 'and did not say why');
+
+  // And now he can.
+  w.character.skills.oneHanded = 25;
+  standAndTalk(w, 'npc9');
+  say('aldric.join');
   eq(w.character.guild, 'watch', 'the oath was not taken');
+  assert(w.carrying('watch_mail'), 'a sworn man of the Watch has no mail');
+});
+
+check('an oath shuts the other two doors for good', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  w.character.guild = 'watch';
+  for (const [who, node] of [['npc11', 'kelm.other_guild'], ['npc12', 'sarn.other_guild']]) {
+    standAndTalk(w, who);
+    const ids = w.dialogue.active.options.map((o) => o.id);
+    assert(ids.includes(node), `${who} still had something to offer a sworn man`);
+    // And nothing on offer can make him one of theirs.
+    assert(!ids.some((id) => id.endsWith('.join')), `${who} would still take the oath`);
+  }
+});
+
+check('the upper quarter has four ways in and each one is a different act', () => {
+  const ways = {
+    // an oath
+    sworn: (w) => { w.character.guild = 'watch'; },
+    // money
+    bribed: (w) => { w.flags.add('knows:upper_ways'); w.character.gold = 400; },
+    // somebody's errand
+    errand: (w) => { w.give('sealed_letter'); w.setQuest('q_letter', 'told'); w.tick(1 / 60); },
+  };
+  for (const [name, setup] of Object.entries(ways)) {
+    const w = createWorld({ seed: 2, beasts: 0, props: 10 });
+    standAndTalk(w, 'npc0');
+    w.dialogue.say(0);                         // watch.greet — refused
+    eq(w.quests.get('q_upper'), 'refused', `${name}: the guard let a stranger through`);
+    setup(w);
+    standAndTalk(w, 'npc0');
+    const i = w.dialogue.active.options.findIndex((o) => o.id.startsWith('watch.')
+      && ['watch.sworn_pass', 'watch.bribe', 'watch.errand'].includes(o.id));
+    assert(i >= 0, `${name}: no way through was offered`);
+    w.dialogue.say(i);
+    w.tick(1 / 60);
+    assert(w.flags.has('pass:upper'), `${name}: the gate did not open`);
+    assert(w.doorOpen('upper'), `${name}: the flag was set but the door was still there`);
+  }
+
+  // The fourth way is not a conversation at all: it is a jump only an acrobat
+  // can make, off a stack of crates nobody drew attention to.
+  const w = createWorld({ seed: 2, beasts: 0, props: 10 });
+  const u = w.city.upper;
+  w.player.pos[0] = u.at[0]; w.player.pos[2] = u.at[1];
+  w.player.pos[1] = w.terrain.heightAt(u.at[0], u.at[1]);
+  w.player.onGround = true;
+  w.tick(1 / 60);
+  eq(w.quests.get('q_upper'), 'done', 'standing in the upper quarter went unnoticed');
+  assert(w.flags.has('pass:upper'), 'the climb did not count');
+});
+
+check('a chapter rewrites the island, and will not begin early', () => {
+  const w = createWorld({ seed: 3, beasts: 12, props: 10 });
+  eq(w.chapter, 1, 'a new game starts in chapter one');
+  const before = w.beasts.length;
+  assert(!w.setChapter(3).ok, 'chapter three began without Ossric');
+  assert(!w.setChapter(2).ok, 'chapter two began without an oath');
+
+  w.character.guild = 'freeblade';
+  w.tick(1 / 60);
+  eq(w.chapter, 2, 'swearing an oath did not begin chapter two');
+  assert(w.beasts.length > before, 'chapter two put nothing new on the island');
+  assert(w.beasts.some((b) => b.ring === 2), 'and nothing that belongs to it');
+  assert(w.doorOpen('upper'), 'a sworn man was still shut out of his own upper quarter');
+
+  // Straight to four is refused: each chapter is its own door.
+  assert(!w.setChapter(4).ok, 'chapter four began without the Cleft');
 });
 
 // --- saving -------------------------------------------------------------------

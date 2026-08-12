@@ -233,7 +233,8 @@ function encodeFrame(payload, opcode) {
 const KEYS = {
   KeyW: [87, 'w'], KeyA: [65, 'a'], KeyS: [83, 's'], KeyD: [68, 'd'],
   KeyQ: [81, 'q'], KeyE: [69, 'e'], KeyC: [67, 'c'], KeyF: [70, 'f'], KeyG: [71, 'g'],
-  KeyT: [84, 't'], Digit1: [49, '1'], Digit2: [50, '2'], Escape: [27, 'Escape'],
+  KeyT: [84, 't'], KeyI: [73, 'i'], KeyJ: [74, 'j'],
+  Digit1: [49, '1'], Digit2: [50, '2'], Digit3: [51, '3'], Escape: [27, 'Escape'],
   Space: [32, ' '], ShiftLeft: [16, 'Shift'], ControlLeft: [17, 'Control'],
   ArrowUp: [38, 'ArrowUp'], ArrowDown: [40, 'ArrowDown'],
   ArrowLeft: [37, 'ArrowLeft'], ArrowRight: [39, 'ArrowRight'],

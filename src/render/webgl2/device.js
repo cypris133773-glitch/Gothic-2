@@ -215,12 +215,15 @@ void main() {
 
   // Aerial perspective, cheaply: distance fades toward the sky, which is what
   // gives a landscape depth and stops far terrain reading as a painted flat.
-  // Aerial perspective. Half the previous strength: at 0.0052 per metre a tree
-  // a hundred and fifty metres away was already half sky, which reads as haze
-  // on a clear morning and flattens exactly the distance the LOD rings were
-  // added to show.
-  float fog = 1.0 - exp(-dist * 0.0026);
-  lit = mix(lit, uFogColor, min(fog, 0.72));
+  //
+  // Tuned down twice. At 0.0052 per metre a tree a hundred and fifty metres
+  // away was already half sky. At 0.0026 the city, photographed from the farm
+  // road ninety metres out, was a pale smudge — and the whole reason the island
+  // grew to three hundred and forty metres was so that you could see where you
+  // were going from a long way off. A landmark has to survive the haze between
+  // you and it or it is not a landmark.
+  float fog = 1.0 - exp(-dist * 0.0014);
+  lit = mix(lit, uFogColor, min(fog, 0.62));
 
   outColor = vec4(pow(aces(lit), vec3(1.0 / 2.2)), 1.0);
 }`;

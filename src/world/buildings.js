@@ -211,3 +211,248 @@ export function buildStall(x, z, ground, yaw, seed = 0) {
   }
   return out;
 }
+
+/**
+ * A curtain wall with towers and gates.
+ *
+ * The wall is the most important piece of level design on the island: it is
+ * what makes the city a place you are let into rather than a cluster of houses
+ * you wander through. It is built as a ring of segments so a gate can be put on
+ * whichever side a road arrives from, and the merlons are a separate row of
+ * small boxes because a flat-topped wall reads as a fence.
+ *
+ * `groundAt(x, z)` is optional and is how a wall follows a hillside rather than
+ * hovering at one end and burying itself at the other. Ring geometry over
+ * non-flat ground without it is the single most obvious tell of a generated
+ * town, so the cloister wall on the temple shelf passes one too.
+ */
+export function buildWall(spec) {
+  const { x, z, ground, rx, rz, gateAngle, height = 6.5, segments = 40 } = spec;
+  const groundAt = spec.groundAt || (() => ground);
+  // A city has more than one way in — a harbour gate and a land gate at the
+  // least — so the ring takes a list. `gateAngle` is the one-gate spelling and
+  // is kept because the monastery cloister only ever wants one.
+  const gates = spec.gates || [gateAngle ?? 0];
+  const stone = [0.30, 0.29, 0.27], dark = [0.22, 0.21, 0.20];
+  const out = [];
+  const gateWidth = 0.16;                       // as a fraction of the ring
+
+  /** Angular distance from this point on the ring to the nearest gate. */
+  const toGate = (a) => {
+    let best = Math.PI;
+    for (const g of gates) {
+      let d = a - g;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      best = Math.min(best, Math.abs(d));
+    }
+    return best;
+  };
+
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    // Leave a hole where a gate goes.
+    const da = toGate(a0);
+    const inGate = da < gateWidth;
+
+    const px = x + Math.cos(a0) * rx, pz = z + Math.sin(a0) * rz;
+    const qx = x + Math.cos(a1) * rx, qz = z + Math.sin(a1) * rz;
+    const mx = (px + qx) / 2, mz = (pz + qz) / 2;
+    const len = Math.hypot(qx - px, qz - pz) * 1.06;
+    const yaw = Math.atan2(qx - px, qz - pz);
+    // Sunk half a metre, so a segment on a slope has no daylight under its
+    // low corner.
+    const gy = groundAt(mx, mz) - 0.5;
+
+    if (!inGate) {
+      out.push({
+        pos: [mx, gy + height / 2, mz], yaw, pitch: 0,
+        scale: [1.5, height, len], albedo: stone, tex: MAT.ROCK,
+        box: [1.5, len],
+      });
+      // Merlons: alternate blocks along the top.
+      if (i % 2 === 0) {
+        out.push({
+          pos: [mx, gy + height + 0.45, mz], yaw, pitch: 0,
+          scale: [1.7, 0.9, len * 0.55], albedo: dark, tex: MAT.ROCK,
+        });
+      }
+    } else {
+      // The gate: a lintel and a raised portcullis over the hole, so the
+      // opening reads as a gate rather than as a gap where the wall failed.
+      // Neither carries a collider: this is the way through.
+      out.push({
+        pos: [mx, gy + height + 1.0, mz], yaw, pitch: 0,
+        scale: [2.2, 2.0, len * 1.1], albedo: stone, tex: MAT.ROCK,
+      });
+      out.push({
+        pos: [mx, gy + height * 0.9, mz], yaw, pitch: 0,
+        scale: [1.0, 1.6, len * 0.9], albedo: [0.16, 0.12, 0.08], tex: MAT.PLANK,
+      });
+    }
+
+    // A tower every eighth segment, and always beside a gate — but never *in*
+    // one, which the single-gate version used to do: the flanking test included
+    // the hole, so every gate had a drum standing in the middle of it.
+    if (!inGate && (i % 8 === 0 || da < gateWidth * 2.4)) {
+      const ty = groundAt(px, pz) - 0.5;
+      out.push({
+        pos: [px, ty + height * 0.75, pz], yaw: a0, pitch: 0,
+        scale: [3.4, height * 1.5, 3.4], albedo: stone, tex: MAT.ROCK,
+        radius: 1.9,
+      });
+      out.push({
+        pos: [px, ty + height * 1.5 + 0.5, pz], yaw: a0, pitch: 0,
+        scale: [4.0, 0.5, 4.0], albedo: dark, tex: MAT.ROCK,
+      });
+    }
+  }
+  return out;
+}
+
+/** A farm: a longhouse, a barn, a fence and a field of furrows. */
+export function buildFarm(x, z, ground, yaw, seed = 0) {
+  const rng = makeRng(hash(`farm:${x}:${z}:${seed}`));
+  const out = buildHouse({ x, z, ground, yaw, w: 9, d: 6, storeys: 1, seed });
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  const put = (lx, lz, sx, sh, sz, albedo, tex, radius = 0, pitch = 0) => out.push({
+    pos: [x + lx * cy + lz * sy, ground + sh / 2, z - lx * sy + lz * cy],
+    yaw, pitch, scale: [sx, sh, sz], albedo, tex, radius,
+  });
+
+  // The barn: bigger, cruder, thatched.
+  put(13, 2, 8, 4.2, 7, [0.26, 0.19, 0.13], MAT.PLANK, 4.4);
+  out.push({
+    pos: [x + 13 * cy + 2 * sy, ground + 5.2, z - 13 * sy + 2 * cy],
+    yaw, pitch: 0, scale: [9, 1.4, 8], albedo: [0.38, 0.31, 0.16], tex: MAT.THATCH,
+  });
+
+  // A fence around the yard, and a field of furrows behind it.
+  for (let i = -5; i <= 5; i++) {
+    put(i * 2.4, -9, 0.16, 1.1, 0.16, [0.22, 0.16, 0.10], MAT.TIMBER);
+    put(i * 2.4, -8.9, 2.3, 0.12, 0.1, [0.22, 0.16, 0.10], MAT.TIMBER);
+  }
+  for (let f = 0; f < 11; f++) {
+    put(-13 + f * 1.4, 12, 0.75, 0.14, 15, [0.17, 0.13, 0.09], MAT.DIRT);
+  }
+  // Something to steal, because a farm with nothing on it is scenery.
+  put(-6, 3, 0.8, 0.9, 0.8, [0.30, 0.22, 0.12], MAT.PLANK, 0.5);
+  return out;
+}
+
+/** The necromancer's tower: a black drum on a plateau, and nothing friendly. */
+export function buildTower(x, z, ground) {
+  const dark = [0.13, 0.12, 0.14], iron = [0.17, 0.16, 0.17];
+  const out = [];
+  const H = 22;
+  for (let i = 0; i < 6; i++) {
+    const w = 7.5 - i * 0.55;
+    out.push({
+      pos: [x, ground + 1.5 + i * (H / 6), z], yaw: i * 0.16, pitch: 0,
+      scale: [w, H / 6 + 0.1, w], albedo: dark, tex: MAT.ROCK,
+      radius: i === 0 ? 4.2 : 0,
+    });
+  }
+  out.push({ pos: [x, ground + H + 2.2, z], yaw: 0.4, pitch: 0, scale: [8.6, 1.0, 8.6], albedo: iron, tex: MAT.ROCK });
+  // Four spines, because the silhouette is the whole point of a landmark.
+  for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+    out.push({
+      pos: [x + dx * 3.6, ground + H + 4.4, z + dz * 3.6], yaw: 0, pitch: dz * 0.3, roll: dx * 0.3,
+      scale: [0.5, 4.5, 0.5], albedo: iron, tex: MAT.ROCK,
+    });
+  }
+  out.push({ pos: [x, ground + 2.2, z + 4.3], yaw: 0, pitch: 0, scale: [1.6, 3.0, 0.4], albedo: [0.08, 0.07, 0.09], tex: MAT.FLAT });
+  return out;
+}
+
+/** A lighthouse on a headland. Tall, pale, and visible from most of the map. */
+export function buildLighthouse(x, z, ground) {
+  const pale = [0.42, 0.41, 0.38], band = [0.34, 0.14, 0.12];
+  const out = [];
+  const H = 26;
+  for (let i = 0; i < 8; i++) {
+    const w = 6.2 - i * 0.5;
+    out.push({
+      pos: [x, ground + 1.2 + i * (H / 8), z], yaw: 0, pitch: 0,
+      scale: [w, H / 8 + 0.1, w], albedo: i % 2 ? band : pale, tex: MAT.ROCK,
+      radius: i === 0 ? 3.4 : 0,
+    });
+  }
+  out.push({ pos: [x, ground + H + 1.6, z], yaw: 0, pitch: 0, scale: [4.4, 2.4, 4.4], albedo: [0.10, 0.11, 0.13], tex: MAT.FLAT });
+  out.push({ pos: [x, ground + H + 3.2, z], yaw: 0, pitch: 0, scale: [5.2, 0.6, 5.2], albedo: [0.20, 0.19, 0.18], tex: MAT.ROCK });
+  return out;
+}
+
+/** The monastery: a hall, a cloister wall and a bell tower above the lake. */
+export function buildMonastery(x, z, ground, seed = 0, groundAt = null) {
+  const stone = [0.34, 0.32, 0.29], roof = [0.17, 0.15, 0.17];
+  const out = [];
+  // The hall.
+  out.push({ pos: [x, ground + 4, z], yaw: 0, pitch: 0, scale: [22, 8, 13], albedo: stone, tex: MAT.ROCK, box: [22, 13] });
+  for (const ez of [-1, 1]) {
+    out.push({
+      pos: [x, ground + 9.4, z + ez * 3.4], yaw: 0, pitch: ez * 0.8,
+      scale: [23, 0.5, 9], albedo: roof, tex: MAT.SLATE,
+    });
+  }
+  // A row of arched openings, implied by dark inserts between piers.
+  for (let i = -4; i <= 4; i++) {
+    out.push({ pos: [x + i * 2.3, ground + 3.2, z + 6.6], yaw: 0, pitch: 0, scale: [1.1, 3.4, 0.4], albedo: [0.09, 0.09, 0.10], tex: MAT.FLAT });
+  }
+  // The bell tower.
+  out.push({ pos: [x + 14, ground + 9, z - 2], yaw: 0.2, pitch: 0, scale: [6.4, 18, 6.4], albedo: stone, tex: MAT.ROCK, radius: 3.6 });
+  out.push({ pos: [x + 14, ground + 19.4, z - 2], yaw: 0.2, pitch: 0, scale: [7.6, 1.2, 7.6], albedo: roof, tex: MAT.SLATE });
+  // The cloister wall, low, with a gate facing the road.
+  out.push(...buildWall({
+    x, z, ground, groundAt, rx: 26, rz: 20,
+    gateAngle: Math.PI / 2, height: 3.4, segments: 26,
+  }));
+  return out;
+}
+
+/**
+ * The mouth of the Cleft: a barricade across the pass, and the two rock spurs
+ * it is wedged between.
+ *
+ * This is a *door with no lock* — it can be walked round from the first hour,
+ * and what stops you is what lives on the other side. That distinction is the
+ * whole of pillar P2 and it is worth building the barricade to make the point
+ * visible: the game says "not yet" with geometry and monsters, never with an
+ * invisible wall.
+ */
+export function buildCleftGate(x, z, ground) {
+  const rock = [0.19, 0.18, 0.17], timber = [0.20, 0.14, 0.09];
+  const out = [];
+  for (const s of [-1, 1]) {
+    for (let i = 0; i < 3; i++) {
+      out.push({
+        pos: [x + s * (11 + i * 1.6), ground + 3 + i * 3.4, z + s * i * 1.2],
+        yaw: s * 0.4 + i * 0.3, pitch: 0,
+        scale: [9 - i * 1.8, 8 - i * 0.8, 9 - i * 1.8],
+        albedo: rock, tex: MAT.ROCK, radius: i === 0 ? 4.5 : 0,
+      });
+    }
+  }
+  // The barricade itself: posts, two rails and a gap you can squeeze past.
+  for (let i = -3; i <= 3; i++) {
+    if (i === 0) continue;
+    out.push({
+      pos: [x + i * 2.6, ground + 1.3, z], yaw: 0.05 * i, pitch: 0,
+      scale: [0.3, 2.6, 0.3], albedo: timber, tex: MAT.TIMBER, radius: 0.25,
+    });
+  }
+  for (const h of [1.0, 1.9]) {
+    out.push({
+      pos: [x - 5.5, ground + h, z], yaw: 0, pitch: 0,
+      scale: [7, 0.22, 0.22], albedo: timber, tex: MAT.TIMBER,
+    });
+    out.push({
+      pos: [x + 5.5, ground + h, z], yaw: 0, pitch: 0,
+      scale: [7, 0.22, 0.22], albedo: timber, tex: MAT.TIMBER,
+    });
+  }
+  // A dead watch fire. Somebody stood here once.
+  out.push({ pos: [x + 3.4, ground + 0.2, z + 4], yaw: 0.6, pitch: 0, scale: [1.8, 0.35, 1.8], albedo: [0.09, 0.08, 0.07], tex: MAT.ROCK });
+  return out;
+}

@@ -99,10 +99,14 @@ const VISTA = !!opt('vista');
 const SCENES = LINEUP
   ? [{ name: 'models', time: 11 }]
   : VISTA
-  // A ridge north-east of the town, looking back across it. This is the framing
-  // that shows whether the distance holds up: terrain LOD, aerial perspective,
-  // and whether the town reads as a place from outside it.
-  ? [{ name: 'vista', time: 16.5, extra: '&start=74,-58&yaw=-0.90' }]
+  // Two framings from outside the walls. The first is the one that shows
+  // whether distance holds up — terrain LOD, aerial perspective, and whether
+  // the city reads as a place rather than a cluster of roofs. The second is the
+  // gate itself, which is the single most important object on the island.
+  ? [
+      { name: 'vista', time: 11.0, extra: '&start=0,96&yaw=3.1416' },
+      { name: 'gate', time: 10.5, extra: '&start=0,56&yaw=3.1416' },
+    ]
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]
   : [

@@ -43,38 +43,226 @@ function fbm(seed, x, z, octaves = 5) {
   return sum / norm;
 }
 
+/**
+ * The places on the island, and the roads between them (docs/WORLD.md).
+ *
+ * These are *control curves*, not decoration: the height function flattens the
+ * ground under a pad and carves a shelf under a road, so a road is the flat
+ * ground rather than a stripe painted on a hillside. Walking off one is a
+ * decision you feel in the slope under your feet, which is the whole of how
+ * this game states difficulty (pillar P2).
+ */
+export const PLACES = {
+  halden:     { at: [0, 0],      r: 46, w: 34, level: 1.2, kind: 'city' },
+  farm_aldwin:{ at: [-58, 74],   r: 15, level: 3.0, kind: 'farm' },
+  farm_bren:  { at: [26, 96],    r: 14, level: 4.5, kind: 'farm' },
+  farm_sekk:  { at: [96, 52],    r: 14, level: 6.0, kind: 'farm' },
+  farm_marrow:{ at: [-104, 22],  r: 14, level: 5.0, kind: 'farm' },
+  farm_hulder:{ at: [64, -84],   r: 14, level: 7.0, kind: 'farm' },
+  chapter:    { at: [-18, -118], r: 34, level: 12.0, kind: 'temple' },
+  tower:      { at: [122, -104], r: 22, level: 15.0, kind: 'tower' },
+  lighthouse: { at: [-142, -34], r: 13, level: 9.0, kind: 'light' },
+  cleft:      { at: [168, 46],   r: 22, level: 12.0, kind: 'pass' },
+};
+
+/**
+ * Roads, as polylines. Width in metres; the shoulder falls away either side.
+ *
+ * Every inland road leaves through one gate and every coastal road through the
+ * other. That is not tidiness — it is the whole reason the wall is worth
+ * building: if there were four ways out of the city, being refused at one of
+ * them would mean nothing.
+ */
+export const GATE_APRON = [0, 44];       // outside the land gate, where the roads fork
+export const HARBOUR_APRON = [-40, -4];  // outside the harbour gate
+
+// `levels` is the height of the road at each point, in metres, and two things
+// about it are load-bearing, both found by the walkability test rather than by
+// looking at it.
+//
+// It is **written down, not inferred.** The first version worked out each
+// vertex's height from whichever place happened to be nearest — fine at the two
+// ends of a road and nonsense in the middle, where the tower road's mid-point
+// was nearest a farm at seven metres, so the lane dropped nineteen metres and
+// climbed back out at one in two.
+//
+// A road that ends at a place carries **a vertex on that place's rim, already
+// at the place's height**, and runs flat from there to the middle. Without it
+// the lane and the pad disagree about the same square metre for the last thirty
+// metres, the blend hands over between them within a couple of steps, and the
+// approach to the monastery has a hump the height of the disagreement.
+export const ROADS = [
+  { name: 'gate apron',  width: 6.0, points: [[0, 34], GATE_APRON],                          levels: [1.2, 1.6] },
+  { name: 'farm road',   width: 5.0, points: [GATE_APRON, [-20, 58], [-58, 74]],             levels: [1.6, 2.2, 3.0] },
+  { name: 'south fork',  width: 4.2, points: [[-20, 58], [26, 96]],                          levels: [2.2, 4.5] },
+  { name: 'east road',   width: 5.0, points: [GATE_APRON, [54, 30], [78, 14], [96, 52]],     levels: [1.6, 3.5, 5.0, 6.0] },
+  { name: 'cleft road',  width: 4.6, points: [[96, 52], [140, 50], [168, 46]],               levels: [6.0, 9.0, 12.0] },
+  { name: 'tower road',  width: 4.0, points: [[78, 14], [110, -46], [117.5, -82], [122, -104]], levels: [5.0, 10.0, 15.0, 15.0] },
+  { name: 'north lane',  width: 4.0, points: [[78, 14], [64, -84]],                          levels: [5.0, 7.0] },
+  { name: 'harbour way', width: 5.4, points: [[-26, 0], HARBOUR_APRON],                      levels: [1.2, 1.5] },
+  { name: 'temple road', width: 4.6, points: [HARBOUR_APRON, [-36, -62], [-28, -86], [-18, -118]], levels: [1.5, 8.0, 12.0, 12.0] },
+  { name: 'coast road',  width: 4.4, points: [HARBOUR_APRON, [-88, -20], [-142, -34]],       levels: [1.5, 5.0, 9.0] },
+  { name: 'west lane',   width: 4.0, points: [HARBOUR_APRON, [-104, 22]],                    levels: [1.5, 5.0] },
+];
+
+/**
+ * How wide the shoulder has to be to make up a cut of `drop` metres.
+ *
+ * One in three is roughly the angle loose earth stands at. The cap is a
+ * backstop against a pathological design: past it the ground simply meets the
+ * noise at whatever slope it can manage, which is a cliff, and a cliff is a
+ * fine thing to have as long as no road is drawn across it.
+ *
+ * Two roads were drawn across one. The monastery shelf and the tower plateau
+ * were authored at twenty-two and twenty-six metres over ground the noise puts
+ * at eight to fourteen, so their flanks needed sixty metres of batter, hit the
+ * cap, and the last stretch of both approaches came out at twenty-five degrees.
+ * Widening the cap alone was not the answer — the answer was that the two
+ * landmarks were simply too high for the island they stand on. They are twelve
+ * and fifteen now, which is still a shelf and still a plateau, and the height
+ * that was lost is in the bell tower and the spines instead, where it shows.
+ */
+function batter(drop) {
+  return Math.min(Math.abs(drop) * 3.0, 45);
+}
+
+/** The places, with their ellipse radii worked out once. */
+const PLACE_LIST = Object.values(PLACES).map((p) => ({
+  ...p, rx: p.w || p.r, rz: p.r, rmin: Math.min(p.w || p.r, p.r),
+}));
+
+/** Distance from a point to a segment, and the fraction along it. */
+function distToSegment(px, pz, ax, az, bx, bz) {
+  const dx = bx - ax, dz = bz - az;
+  const len2 = dx * dx + dz * dz || 1;
+  let t = ((px - ax) * dx + (pz - az) * dz) / len2;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  return { d: Math.hypot(px - (ax + dx * t), pz - (az + dz * t)), t };
+}
+
 export function createTerrain(seed = 1) {
   const s = hash(`terrain:${seed}`) & 0xffff;
 
   /**
-   * The authored part. A flat pad where the settlement stands and a road
-   * running north out of it, both of which flatten the noise rather than
-   * replace it — a road that ignores the landscape reads as a texture decal,
-   * and a road that bends the landscape around itself reads as a road.
+   * Road segments, flattened and with their endpoint heights resolved once.
+   *
+   * `heightAt` is called something like seven hundred thousand times to build
+   * the chunks around the player, and the first version worked out which place
+   * each segment's endpoints belonged to *inside* that loop — ten distance
+   * checks per endpoint, two endpoints per segment, fourteen segments, every
+   * sample. Building the world took three seconds. The endpoints are constants;
+   * resolving them here costs a hundred microseconds once.
    */
-  function flatten(x, z) {
-    const padDist = Math.max(Math.abs(x) / 26, Math.abs(z) / 20);
-    const pad = 1 - smooth01((padDist - 0.7) / 0.6);
-    // The road is a corridor along +Z, wandering slightly so it is not a ruler.
-    const wander = (noise2(s + 7, z * 0.02, 0) - 0.5) * 18;
-    const road = 1 - smooth01((Math.abs(x - wander) - 4) / 7);
-    return Math.max(pad, road * 0.85);
+  const SEGMENTS = [];
+  for (const road of ROADS) {
+    for (let i = 0; i < road.points.length - 1; i++) {
+      const [ax, az] = road.points[i], [bx, bz] = road.points[i + 1];
+      SEGMENTS.push({
+        ax, az, bx, bz,
+        crown: road.width * 0.55,
+        base: road.width * 1.9,
+        ha: road.levels ? road.levels[i] : nearestPlaceLevel(ax, az),
+        hb: road.levels ? road.levels[i + 1] : nearestPlaceLevel(bx, bz),
+      });
+    }
   }
 
-  function heightAt(x, z) {
+  /**
+   * How much this point is flattened, and to what height.
+   *
+   * Two things make this work, and both were learned from a failing test.
+   *
+   * **Influences are blended, not competed.** The first version took whichever
+   * control had the greatest weight and used its level outright. That is
+   * discontinuous wherever two controls of different heights cross over: the
+   * winner changes in the space of one sample and the ground steps. A weighted
+   * average with a cubed weight keeps the strongest influence dominant while
+   * making the handover smooth.
+   *
+   * **The batter widens with the cut.** A road that has to make up twenty-five
+   * metres of hillside cannot do it inside its own eight-metre shoulder — that
+   * is not an embankment, it is a wall. So the falloff distance grows with the
+   * height difference at a slope of about one in three, exactly as a real cut
+   * and fill does, and the cliff goes away without the road getting wider.
+   *
+   * @param base the *uncontrolled* height here, which is what the cut is measured against
+   */
+  function control(x, z, base) {
+    let sum = 0, acc = 0, weight = 0;
+    const add = (w, level) => {
+      if (w <= 0) return;
+      const k = w * w * w;
+      sum += k; acc += k * level;
+      if (w > weight) weight = w;
+    };
+    // Pass one: the places. Their blended level and their strongest claim on
+    // this point are both needed before any road is considered.
+    let psum = 0, pacc = 0, claim = 0;
+    for (const p of PLACE_LIST) {
+      // City pads are oblong (a harbour town is longer than it is wide); the
+      // rest are round, and distance is measured in units of the radius.
+      const d = Math.hypot((x - p.at[0]) / p.rx, (z - p.at[1]) / p.rz);
+      const band = 0.72 + batter(p.level - base) / p.rmin;
+      if (d > 0.72 + band) continue;
+      const w = 1 - smooth01((d - 0.72) / band);
+      if (w <= 0) continue;
+      const k = w * w * w;
+      psum += k; pacc += k * p.level;
+      if (w > claim) claim = w;
+      add(w, p.level);
+    }
+    const plevel = psum > 0 ? pacc / psum : 0;
+
+    // Pass two: the roads.
+    //
+    // They are *not* dragged toward whatever place claims the ground under
+    // them. That was tried, on the reasoning that a lane entering a place
+    // should be at the height of the place — and it made the worst gradient on
+    // the island half again as bad, because the pad's weight falls off on a
+    // smoothstep and a road whose level tracks that weight inherits the whole
+    // flank as its own slope. What actually fixes the disagreement is the road
+    // and the pad agreeing in the data: a road that ends at a place carries a
+    // vertex on that place's rim, already at the place's height.
+    for (const g of SEGMENTS) {
+      const { d, t } = distToSegment(x, z, g.ax, g.az, g.bx, g.bz);
+      // The road's own height is interpolated between the two places it joins,
+      // so a lane climbing to the monastery actually climbs.
+      const level = g.ha + (g.hb - g.ha) * t;
+      const band = g.base + batter(level - base);
+      if (d > g.crown + band) continue;
+      add((1 - smooth01((d - g.crown) / band)) * 0.9, level);
+    }
+    return { weight, level: sum > 0 ? acc / sum : 0 };
+  }
+
+  /** The height of whatever place is nearest a road's endpoint. */
+  function nearestPlaceLevel(x, z) {
+    let best = null, bestD = Infinity;
+    for (const p of Object.values(PLACES)) {
+      const d = Math.hypot(x - p.at[0], z - p.at[1]);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best ? best.level : 2;
+  }
+
+  /** The island as the noise made it, before anybody built a road on it. */
+  function baseHeight(x, z) {
     // Large-scale relief, then a medium band for hillocks, then fine detail.
     const relief = fbm(s, x * 0.0045, z * 0.0045, 4) * 34;
     const hills = fbm(s + 31, x * 0.021, z * 0.021, 3) * 5.5;
     const detail = fbm(s + 57, x * 0.13, z * 0.13, 2) * 0.55;
-    let h = relief + hills + detail - 14;
+    const h = relief + hills + detail - 14;
 
     // The island falls away to the sea at the edge of the playable area, so a
     // player who walks to the boundary meets a coast rather than a wall.
     const edge = Math.max(Math.abs(x), Math.abs(z)) / HALF;
-    h -= smooth01((edge - 0.72) / 0.28) * 26;
+    return h - smooth01((edge - 0.72) / 0.28) * 26;
+  }
 
-    const f = flatten(x, z);
-    return h * (1 - f) + 1.2 * f;
+  function heightAt(x, z) {
+    const h = baseHeight(x, z);
+    const c = control(x, z, h);
+    return h * (1 - c.weight) + c.level * c.weight;
   }
 
   /** Central difference, one metre apart — accurate enough for slopes and IK. */
@@ -95,7 +283,10 @@ export function createTerrain(seed = 1) {
   }
   const _n = new Float32Array(3);
 
-  return { seed, heightAt, normalAt, slopeAt, padFactor: flatten, size: TERRAIN_SIZE };
+  /** How built-up this point is: 1 in a square, 0 in a wood. */
+  const padFactor = (x, z) => control(x, z, baseHeight(x, z)).weight;
+
+  return { seed, heightAt, normalAt, slopeAt, padFactor, places: PLACES, roads: ROADS, size: TERRAIN_SIZE };
 }
 
 /**

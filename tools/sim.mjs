@@ -88,9 +88,32 @@ export function goldenPath(seed, { maxSeconds = 900, verbose = false } = {}) {
     return true;
   }
 
+  /**
+   * Steer along a list of points, and report true at the end of the last one.
+   *
+   * The city has a wall round it, which means "walk toward the thing you want"
+   * stopped being a route the moment the map got a gate. This is not a navmesh
+   * (that is M3) — it is the bot being told which door to use, the same way a
+   * player is told by being able to see it. The waypoints come off the world
+   * rather than being written down here, so moving a gate cannot leave a test
+   * quietly walking into masonry.
+   */
+  const legs = new Map();
+  function walkVia(name, points, within = 2.0) {
+    let i = legs.get(name) ?? 0;
+    const last = points.length - 1;
+    const [x, z] = points[i];
+    if (walkTo(x, z, i === last ? within : 3.0)) {
+      if (i === last) return true;
+      legs.set(name, ++i);
+    }
+    return false;
+  }
+
   const npc = (id) => world.people.find((p) => p.id === id);
   const smith = npc('npc3'), guard = npc('npc0');
-  const CRATES = [6, -46];
+  const CRATES = [world.crates[0].pos[0], world.crates[0].pos[2]];
+  const GATE = world.gates.land, APRON = world.gates.apron;
 
   // The plan, as a list of things to be true, each with what to do until it is.
   const plan = [
@@ -106,11 +129,17 @@ export function goldenPath(seed, { maxSeconds = 900, verbose = false } = {}) {
         if (say('harl.train') || world.openTrainer) { world.train(); world.dialogue.close(); }
       } },
     { goal: 'find the crates', done: () => world.quests.get('q_ore') === 'found',
-      act: () => { world.dialogue.close(); if (!fightNearby()) walkTo(CRATES[0], CRATES[1], 2.5); } },
+      act: () => {
+        world.dialogue.close();
+        if (!fightNearby()) walkVia('out', [[GATE[0], GATE[1] - 8], GATE, APRON, CRATES], 2.5);
+      } },
     { goal: 'report back', done: () => world.quests.get('q_ore') === 'done',
       act: () => {
         if (fightNearby()) return;
-        if (walkTo(smith.pos[0], smith.pos[2], 1.6)) { if (!world.dialogue.isOpen) world.talk(); say('harl.ore_solved'); }
+        if (walkVia('back', [APRON, GATE, [GATE[0], GATE[1] - 8], [smith.pos[0], smith.pos[2]]], 1.6)) {
+          if (!world.dialogue.isOpen) world.talk();
+          say('harl.ore_solved');
+        }
       } },
     { goal: 'meet the Watch', done: () => world.flags.has('watch:asked'),
       act: () => {

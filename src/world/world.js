@@ -7,8 +7,13 @@
 // object a keyboard produces, and it is the only way anyone will ever prove
 // that a world this size can be walked across and finished.
 
-import { createTerrain, buildChunk, scatter, clutter } from './terrain.js';
-import { buildHouse, buildWell, buildStall } from './buildings.js';
+import {
+  createTerrain, buildChunk, scatter, clutter, PLACES, GATE_APRON, HARBOUR_APRON,
+} from './terrain.js';
+import {
+  buildHouse, buildWell, buildStall, buildWall, buildFarm, buildTower,
+  buildLighthouse, buildMonastery, buildCleftGate,
+} from './buildings.js';
 import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
 import { poseHumanoid, advanceGait, KITS } from '../game/rig.js';
@@ -44,27 +49,135 @@ function deepWater(terrain, x, z) {
   return true;
 }
 
-/** The town: houses around a square, a well in the middle, two market stalls. */
-function buildTown(terrain, seed) {
-  const rng = makeRng(seed * 7919 + 13);
+/**
+ * Halden, quarter by quarter (docs/WORLD.md).
+ *
+ * The city is one ellipse of curtain wall with two ways in — the land gate to
+ * the south, where every inland road forks, and the harbour gate to the west —
+ * and a second, smaller wall inside it around the upper quarter. That inner
+ * ring is the point of the whole layout: it is a door in the world with two
+ * guards in front of it, and the early game is about finding one of the four
+ * ways through. Nothing about it is scripted; it is geometry and a
+ * conversation.
+ */
+export const CITY = {
+  at: [0, 0],
+  wall: { rx: 26, rz: 34, height: 9.0, segments: 56 },
+  // Angles on the wall ellipse: +Z is south (π/2), −X is west (π).
+  gates: { land: Math.PI / 2, harbour: Math.PI },
+  upper: { at: [0, -22], rx: 17, rz: 11, gate: Math.PI / 2, height: 5.0, segments: 30 },
+  square: [0, 14],              // the market, and the middle of the lower quarter
+};
+
+/** Where a gate stands in world space, for signposting and for the bot. */
+function gatePoint(cx, cz, rx, rz, angle) {
+  return [cx + Math.cos(angle) * rx, cz + Math.sin(angle) * rz];
+}
+
+/**
+ * A house, facing something.
+ *
+ * A street of buildings all facing outward reads as a level. Buildings that
+ * turn to face the space in front of them read as a town, and it costs one
+ * `atan2` per house to get it.
+ */
+function facing(x, z, look) {
+  return Math.atan2(x - look[0], z - look[1]) + Math.PI;
+}
+
+/** Every building inside the walls, by quarter. */
+const CITY_PLAN = [
+  // --- the lower quarter: the market square, the smithy, most homes ----------
+  { q: 'lower', at: [-14, 8], look: [0, 14], w: 8, d: 6, storeys: 2 },
+  { q: 'lower', at: [-13, 21], look: [0, 14], w: 7.5, d: 6, storeys: 2 },
+  // These two flank the street to the land gate rather than standing in it. The
+  // first draft put a house on the centre line and the bot walked into its
+  // gable for fifteen minutes.
+  { q: 'lower', at: [-10, 28], look: [0, 22], w: 8, d: 6, storeys: 2 },
+  { q: 'lower', at: [10, 28], look: [0, 22], w: 8, d: 6, storeys: 2 },
+  { q: 'lower', at: [14, 21], look: [0, 14], w: 7.5, d: 6, storeys: 1 },
+  { q: 'lower', at: [15, 8], look: [0, 14], w: 8, d: 6, storeys: 2 },
+  { q: 'lower', at: [8, 1], look: [0, 8], w: 7, d: 5.5, storeys: 1 },
+  // The smithy, which is where the first quest is: low, wide, and open-fronted.
+  { q: 'lower', at: [-8, 1], look: [0, 8], w: 9, d: 6, storeys: 1 },
+  // --- the harbour: warehouses and the tavern -------------------------------
+  { q: 'harbour', at: [-19, -7], look: [-26, 0], w: 11, d: 7, storeys: 1 },
+  { q: 'harbour', at: [-19, 4], look: [-26, 0], w: 10, d: 7, storeys: 1 },
+  { q: 'harbour', at: [-12, -16], look: [-4, -12], w: 10, d: 8, storeys: 2 },
+  // --- the barracks: the Watch's hall, the yard, the armoury ----------------
+  { q: 'barracks', at: [18, -7], look: [6, -7], w: 13, d: 8, storeys: 2 },
+  { q: 'barracks', at: [16, -18], look: [6, -14], w: 8, d: 6, storeys: 1 },
+  // --- the upper quarter: behind the inner wall -----------------------------
+  { q: 'upper', at: [0, -28], look: [0, -18], w: 15, d: 9, storeys: 2 },
+  { q: 'upper', at: [-11, -24], look: [0, -20], w: 8, d: 6, storeys: 2 },
+  { q: 'upper', at: [11, -25], look: [0, -20], w: 8, d: 6, storeys: 2 },
+];
+
+function buildCity(terrain, seed) {
+  const g = (x, z) => terrain.heightAt(x, z);
+  const [cx, cz] = CITY.at;
   const boxes = [];
-  const HOUSES = 9;
-  for (let i = 0; i < HOUSES; i++) {
-    // A ring, but not a regular one — a village that was laid out with a
-    // protractor reads as a level, not as a place people built one at a time.
-    const a = (i / HOUSES) * Math.PI * 2 + rng.range(-0.16, 0.16);
-    const r = rng.range(15.5, 19.5);
-    const x = Math.cos(a) * r, z = Math.sin(a) * r * 0.82;
+
+  boxes.push(...buildWall({
+    x: cx, z: cz, ground: g(cx, cz), groundAt: g,
+    rx: CITY.wall.rx, rz: CITY.wall.rz, height: CITY.wall.height,
+    segments: CITY.wall.segments,
+    gates: [CITY.gates.land, CITY.gates.harbour],
+  }));
+
+  const u = CITY.upper;
+  boxes.push(...buildWall({
+    x: u.at[0], z: u.at[1], ground: g(u.at[0], u.at[1]), groundAt: g,
+    rx: u.rx, rz: u.rz, height: u.height, segments: u.segments,
+    gates: [u.gate],
+  }));
+
+  for (let i = 0; i < CITY_PLAN.length; i++) {
+    const b = CITY_PLAN[i];
+    const [x, z] = b.at;
     boxes.push(...buildHouse({
-      x, z, ground: terrain.heightAt(x, z),
-      // Every house faces the square, which is what makes a square a square.
-      yaw: Math.atan2(x, z) + Math.PI,
-      seed: i + seed,
+      x, z, ground: g(x, z), yaw: facing(x, z, b.look),
+      w: b.w, d: b.d, storeys: b.storeys, seed: i * 17 + seed,
     }));
   }
-  boxes.push(...buildWell(1.5, -1.0, terrain.heightAt(1.5, -1.0)));
-  boxes.push(...buildStall(-7.5, 4.5, terrain.heightAt(-7.5, 4.5), 0.9, seed));
-  boxes.push(...buildStall(7.0, 5.5, terrain.heightAt(7.0, 5.5), -1.1, seed + 1));
+
+  // The market square: the well people stand around, and two stalls.
+  const [sx, sz] = CITY.square;
+  boxes.push(...buildWell(sx, sz, g(sx, sz)));
+  boxes.push(...buildStall(sx - 6.5, sz + 3.5, g(sx - 6.5, sz + 3.5), 0.9, seed));
+  boxes.push(...buildStall(sx + 6.0, sz + 4.5, g(sx + 6.0, sz + 4.5), -1.1, seed + 1));
+
+  return boxes;
+}
+
+/** Everything outside the walls: five farms, three landmarks and the pass. */
+function buildOutlands(terrain, seed) {
+  const g = (x, z) => terrain.heightAt(x, z);
+  const boxes = [];
+
+  // The farms, each turned to face the lane that reaches it.
+  const farms = [
+    ['farm_aldwin', GATE_APRON], ['farm_bren', [-20, 58]], ['farm_sekk', GATE_APRON],
+    ['farm_marrow', HARBOUR_APRON], ['farm_hulder', [78, 14]],
+  ];
+  for (let i = 0; i < farms.length; i++) {
+    const [key, look] = farms[i];
+    const [x, z] = PLACES[key].at;
+    boxes.push(...buildFarm(x, z, g(x, z), facing(x, z, look), seed + i * 31));
+  }
+
+  const chapter = PLACES.chapter.at;
+  boxes.push(...buildMonastery(chapter[0], chapter[1], g(chapter[0], chapter[1]), seed, g));
+
+  const tower = PLACES.tower.at;
+  boxes.push(...buildTower(tower[0], tower[1], g(tower[0], tower[1])));
+
+  const light = PLACES.lighthouse.at;
+  boxes.push(...buildLighthouse(light[0], light[1], g(light[0], light[1])));
+
+  const cleft = PLACES.cleft.at;
+  boxes.push(...buildCleftGate(cleft[0], cleft[1], g(cleft[0], cleft[1])));
+
   return boxes;
 }
 
@@ -93,24 +206,49 @@ function makeLineup(terrain) {
   });
 }
 
-/** The townspeople. Routes are placeholders until the M8 routine system. */
+/**
+ * The people of Halden, placed by quarter.
+ *
+ * Indices are load-bearing: `src/data/dialogue.js` maps npc0 to the gate of the
+ * upper quarter, npc1 to the hunter and npc3 to the smith, and the bot in
+ * tools/sim.mjs finds them by the same ids. Adding somebody goes on the end.
+ */
 function makePeople(terrain, seed) {
   const rng = makeRng(seed * 104729 + 7);
+  const upperGate = gatePoint(CITY.upper.at[0], CITY.upper.at[1], CITY.upper.rx, CITY.upper.rz, CITY.upper.gate);
+  const landGate = gatePoint(CITY.at[0], CITY.at[1], CITY.wall.rx, CITY.wall.rz, CITY.gates.land);
+
   const spec = [
-    { kit: 'guard', at: [4.5, 6.0], route: [[4.5, 6.0], [4.5, -8.0]], speed: 1.6 },
-    { kit: 'villager', at: [-3.0, 3.5], route: null },
-    { kit: 'villager', at: [-2.2, 4.4], route: null },
-    { kit: 'smith', at: [8.5, -2.0], route: null },
-    { kit: 'villager', at: [-8.0, -4.0], route: [[-8.0, -4.0], [6.0, -5.5]], speed: 1.3 },
-    { kit: 'guard', at: [-6.5, 8.5], route: [[-6.5, 8.5], [8.5, 8.0]], speed: 1.5 },
+    // npc0 — the guard on the upper gate. He paces across the opening and
+    // turns strangers away; getting past him is the first act of the game.
+    { kit: 'guard', at: [upperGate[0] - 3.5, upperGate[1] + 1.5], look: [0, 6],
+      route: [[upperGate[0] - 3.5, upperGate[1] + 1.5], [upperGate[0] + 3.5, upperGate[1] + 1.5]], speed: 1.1 },
+    // npc1 — Bosk, who does not live in the city. He waits at the fork outside
+    // the land gate, where the wood begins.
+    { kit: 'villager', at: [GATE_APRON[0] + 4.5, GATE_APRON[1] + 2.0], look: landGate, route: null },
+    { kit: 'villager', at: [CITY.square[0] - 3.2, CITY.square[1] - 2.4], look: CITY.square, route: null },
+    // npc3 — Harl, at his anvil in front of the smithy.
+    { kit: 'smith', at: [-6.0, 6.5], look: [-8, 1], route: null },
+    { kit: 'villager', at: [CITY.square[0] + 2.6, CITY.square[1] + 3.0], look: CITY.square,
+      route: [[3, 17], [-9, -4]], speed: 1.3 },
+    // The land gate, walked by two.
+    { kit: 'guard', at: [landGate[0] - 4.0, landGate[1] - 3.0], look: [0, 40],
+      route: [[landGate[0] - 4.0, landGate[1] - 3.0], [landGate[0] + 4.0, landGate[1] - 3.0]], speed: 1.5 },
+    // The harbour: a porter between the two warehouses.
+    { kit: 'villager', at: [-17.5, -2.0], look: [-26, 0], route: [[-17.5, -6.0], [-17.5, 3.0]], speed: 1.2 },
+    // The barracks yard.
+    { kit: 'guard', at: [10.0, -8.0], look: [18, -7], route: null },
+    { kit: 'villager', at: [-7.0, -14.5], look: [-12, -16], route: null },
   ];
+
   return spec.map((s, i) => {
     const [x, z] = s.at;
     return {
       id: `npc${i}`,
       pos: new Float32Array([x, terrain.heightAt(x, z), z]),
-      // Idle people face the square; the well is what they are standing around.
-      yaw: Math.atan2(1.5 - x, -1.0 - z) + rng.range(-0.4, 0.4),
+      // Idle people face whatever they have business with, plus a little jitter
+      // so a street of them does not look like a firing squad.
+      yaw: facing(x, z, s.look) + rng.range(-0.3, 0.3),
       speed: 0, phase: rng.range(0, Math.PI * 2),
       kit: KITS[s.kit], route: s.route, leg: 0, routeSpeed: s.speed || 1.4,
       pause: 0,
@@ -163,9 +301,14 @@ export function createWorld(opts = {}) {
   // fresh game never begins halfway up a cliff.
   // `start` puts the player anywhere, which is how the gate photographs a
   // vista from a ridge and how a bug report says "stand here".
-  const start = opts.start || (opts.lineup ? [0, -30] : [0, 8]);
+  // Just inside the land gate, on the street up to the market square: the well
+  // ahead, the smithy past it, and the towers of the upper quarter over the
+  // roofs. It is the first thing anybody sees and it is chosen to be the shot
+  // that says what the city is — the well used to be *behind* the camera, so
+  // the opening frame was three quarters of a wooden post.
+  const start = opts.start || (opts.lineup ? [0, -30] : [0, 26]);
   const player = createPlayer(start[0], start[1], terrain);
-  player.yaw = opts.yaw ?? Math.PI;           // by default, looking at the town
+  player.yaw = opts.yaw ?? Math.PI;           // by default, looking up the street
   player.kit = KITS.knight;
   player.phase = 0;
   const camera = createCamera();
@@ -201,32 +344,54 @@ export function createWorld(opts = {}) {
 
   applyLoadout(inventory, character, player.fighter);
 
-  const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 260), [-110, -110, 110, 110]);
-  const town = (opts.town === false || opts.lineup) ? [] : buildTown(terrain, seed);
+  // Props reach as far as the furthest landmark now: the island is 340 m across
+  // the built area, not the 110 m ring the first town sat in.
+  const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 520), [-190, -160, 200, 150]);
+  const town = (opts.town === false || opts.lineup)
+    ? []
+    : [...buildCity(terrain, seed), ...buildOutlands(terrain, seed)];
   const people = opts.lineup ? makeLineup(terrain)
     : opts.people === false ? [] : makePeople(terrain, seed);
 
-  // Wolves, out past the fields. Nothing is placed inside the town: the whole
-  // point of the design is that the road is safe and the woods are not, and a
-  // wolf on the market square would say the opposite (§4, P2).
+  // Wolves, out past the fields. Nothing is placed on a road, on a pad or
+  // inside the walls: the whole point of the design is that the road is safe
+  // and the wood is not, and a wolf on the market square would say the opposite
+  // (§4, P2). Distance from the gate is the difficulty curve, so the further
+  // out a spawn lands the likelier it is to be the thing with tusks.
   const beasts = [];
   if (!opts.lineup && opts.beasts !== false) {
     const brng = makeRng(seed * 31337 + 5);
-    const wanted = opts.beasts ?? 7;
-    for (let i = 0; i < wanted * 12 && beasts.length < wanted; i++) {
-      const a = brng.range(0, Math.PI * 2), r = brng.range(34, 92);
-      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+    // Thirty-four, not seven. The old town sat in a ninety-metre clearing and
+    // seven wolves filled it; the island is three hundred and forty metres
+    // across and the same seven made it empty countryside. Population is a
+    // property of area, and an island you can cross without meeting anything
+    // is not dangerous however hard one wolf hits.
+    const wanted = opts.beasts ?? 34;
+    // `beastsAround` puts the pack somewhere specific, which is how the hunt
+    // harness gets a wood to fight in without teleporting anything.
+    const [hx, hz] = opts.beastsAround || [0, 0];
+    const near = !!opts.beastsAround;
+    for (let i = 0; i < wanted * 40 && beasts.length < wanted; i++) {
+      const a = brng.range(0, Math.PI * 2);
+      const r = near ? brng.range(8, 46) : brng.range(52, 172);
+      const x = hx + Math.cos(a) * r, z = hz + Math.sin(a) * r;
       if (terrain.heightAt(x, z) < 1.2 || terrain.slopeAt(x, z) > 0.5) continue;
-      beasts.push(createBeast(brng.chance(0.75) ? 'wolf' : 'boar', x, z, terrain, brng));
+      if (terrain.padFactor(x, z) > 0.22) continue;     // not on the road or in a yard
+      // Distance from the gate is the difficulty curve, so the further out a
+      // spawn lands the likelier it is to be the thing with tusks.
+      const far = Math.min(1, (Math.hypot(x, z) - 52) / 100);
+      beasts.push(createBeast(brng.chance(0.78 - far * 0.4) ? 'wolf' : 'boar', x, z, terrain, brng));
     }
   }
   const beastParts = beasts.map(() => []);
 
-  // The stolen ore, out on the north road. It is a thing in the world rather
-  // than a dialogue flag: the quest is told in town and *found* by walking.
+  // The stolen ore, off the farm road past the first bend. It is a thing in the
+  // world rather than a dialogue flag: the quest is told in the city and
+  // *found* by walking out of the land gate and down the road.
   const crates = [];
+  const CRATES_AT = [-30, 62];
   if (!opts.lineup) {
-    const cx = 6, cz = -46;
+    const [cx, cz] = CRATES_AT;
     const cy = terrain.heightAt(cx, cz);
     for (let i = 0; i < 3; i++) {
       crates.push({
@@ -239,6 +404,21 @@ export function createWorld(opts = {}) {
 
   // Everything the character controller can bump into.
   const obstacles = [...props, ...town, ...crates].filter((b) => b.radius || b.box);
+
+  // Nobody starts inside a wall. The city is placed by hand and the props are
+  // placed by a generator, so sooner or later one lands on the other; shoving
+  // everybody out once, at build time, costs nothing and turns a class of
+  // "the smith is unreachable" bug into a non-event.
+  // The shim is because `resolveObstacles` slides a *moving* body along the
+  // face it hit, so it wants a velocity. A person being placed has none, and
+  // giving every townsperson a velocity vector they never use would be worse
+  // than lending them a zeroed one for the length of this loop.
+  const placing = { pos: null, vel: new Float32Array(3) };
+  for (const p of people) {
+    placing.pos = p.pos;
+    resolveObstacles(placing, obstacles);
+    p.pos[1] = terrain.heightAt(p.pos[0], p.pos[2]);
+  }
 
   // Scene buffers, reused every frame: the scene is a *view* of the simulation
   // and rebuilding it must not allocate (§8.1.4). The static half never changes;
@@ -266,9 +446,21 @@ export function createWorld(opts = {}) {
     skyLight: [0, 0, 0], groundLight: [0, 0, 0],
   };
 
+  // Where the doors are, in world space. The bot in tools/sim.mjs steers
+  // through them and the render gate frames them; both used to carry their own
+  // copies of these numbers, which is how a map change silently broke a test
+  // that then "passed" by walking into a wall.
+  const gates = {
+    land: gatePoint(CITY.at[0], CITY.at[1], CITY.wall.rx, CITY.wall.rz, CITY.gates.land),
+    harbour: gatePoint(CITY.at[0], CITY.at[1], CITY.wall.rx, CITY.wall.rz, CITY.gates.harbour),
+    upper: gatePoint(CITY.upper.at[0], CITY.upper.at[1], CITY.upper.rx, CITY.upper.rz, CITY.upper.gate),
+    apron: GATE_APRON, harbourApron: HARBOUR_APRON,
+  };
+
   const world = {
     seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
+    crates, gates, places: PLACES, city: CITY,
 
     /** Experience goes to the sheet, which hands out levels and learning points. */
     awardXp(amount, reason = 'quest') {

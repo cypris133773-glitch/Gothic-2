@@ -13,10 +13,10 @@ import { Clock, MINUTES_PER_DAY, GAME_MINUTES_PER_SECOND, sunDirection, keyLight
 import { makeRng, hash } from '../src/core/rng.js';
 import * as m from '../src/core/math.js';
 import { on, emit, off, listenerCount, clearAll } from '../src/core/events.js';
-import { createTerrain } from '../src/world/terrain.js';
+import { createTerrain, PLACES, ROADS } from '../src/world/terrain.js';
 import { createWorld, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
 import { idleIntent } from '../src/core/input.js';
-import { RUN_SPEED } from '../src/game/player.js';
+import { RUN_SPEED, resolveObstacles } from '../src/game/player.js';
 import {
   S, WEAPONS, createFighter, stepFighter, resolveStrike, comboLimit,
   PARRY_TICKS, PARRY_STAGGER, STAGGER_TICKS, MIN_TELEGRAPH, WHIFF_RECOVERY,
@@ -350,7 +350,14 @@ check('the settlement pad is flat and the player starts on it', () => {
     }
   }
   const w = createWorld({ seed: 1, props: 40 });
-  near(w.player.pos[1], t.heightAt(0, 0), 1e-6, 'the player starts on the ground');
+  // On the ground *wherever he starts* — which is on the street inside the land
+  // gate now, not at the origin. The first version compared against the height
+  // at 0,0 and started failing the day the spawn point moved, which is the test
+  // being wrong rather than the game.
+  near(w.player.pos[1], t.heightAt(w.player.pos[0], w.player.pos[2]), 1e-6,
+    'the player starts on the ground');
+  assert(t.padFactor(w.player.pos[0], w.player.pos[2]) > 0.9,
+    'the player starts off the cobbles');
 });
 
 check('walking forward moves the character, and stopping stops it', () => {
@@ -809,13 +816,23 @@ function hunt(world, seconds = 240) {
   return { died: false, at: seconds };
 }
 
+// A wood to fight in: the player put down on the farm road outside the land
+// gate, with the pack in the trees around him.
+//
+// This used to start in the middle of town and walk at whatever was nearest.
+// That stopped working the day the city got a wall round it — the bot pressed
+// into masonry for four minutes and the test reported "never landed a blow",
+// which was true and told you nothing about combat. Putting the fight outside
+// the walls is the honest version of what the test was always measuring.
+const WOOD = { seed: 3, props: 120, beasts: 12, beastsAround: [-24, 60], start: [-24, 60] };
+
 check('the loop closes: a bot can walk out, fight, and earn from it', () => {
-  const w = createWorld({ seed: 3, props: 120, beasts: 7 });
+  const w = createWorld({ ...WOOD });
   const out = hunt(w);
   const alive = w.beasts.filter((b) => b.state !== S.DEAD).length;
-  assert(!out.died || alive < 7, `the bot died at ${out.at.toFixed(0)} s without killing anything`);
+  assert(!out.died || alive < w.beasts.length, `the bot died at ${out.at.toFixed(0)} s without killing anything`);
   assert(w.player.fighter.hits > 0, 'the bot never landed a blow');
-  if (alive < 7) assert(w.player.xp > 0, 'killing a beast earned no experience');
+  if (alive < w.beasts.length) assert(w.player.xp > 0, 'killing a beast earned no experience');
 });
 
 check('a fight is reproducible from the seed', () => {
@@ -823,7 +840,7 @@ check('a fight is reproducible from the seed', () => {
   // outcome every run — sometimes clearing the wood, sometimes dying with two
   // beasts left. A simulation the bots cannot repeat cannot prove anything.
   const play = () => {
-    const w = createWorld({ seed: 3, props: 40, beasts: 5 });
+    const w = createWorld({ ...WOOD, props: 40, beasts: 6 });
     hunt(w, 90);
     const f = w.player.fighter;
     return [f.hp, f.hits, f.crits, w.beasts.filter((b) => b.state === S.DEAD).length].join(',');
@@ -835,7 +852,7 @@ check('the woods are dangerous', () => {
   // A bot that walks into a pack and holds the attack button should not stroll
   // out unhurt. If this ever passes trivially, the creatures have stopped
   // mattering and the road is no longer worth staying on (§4, P2).
-  const w = createWorld({ seed: 3, props: 120, beasts: 7 });
+  const w = createWorld({ ...WOOD });
   hunt(w, 240);
   const f = w.player.fighter;
   assert(f.hp < f.maxHp * 0.75,
@@ -848,6 +865,89 @@ check('nothing is placed on the market square', () => {
     const d = Math.hypot(b.pos[0], b.pos[2]);
     assert(d > 25, `a ${b.kind} spawned ${d.toFixed(1)} m from the well`);
   }
+});
+
+// --- the map ------------------------------------------------------------------
+//
+// The island has a shape now (docs/WORLD.md) and the shape is load-bearing:
+// the walls make the gate mean something, the roads make distance mean
+// difficulty, and the landmarks make the horizon navigable. All three are easy
+// to break with an edit that looks harmless, so all three are tested.
+
+check('every place on the map is flat enough to build on and stand on', () => {
+  const t = createTerrain(2);
+  for (const [name, p] of Object.entries(PLACES)) {
+    const [x, z] = p.at;
+    near(t.heightAt(x, z), p.level, 0.6, `${name} sits at its stated level`);
+    assert(t.slopeAt(x, z) < 0.2, `${name} slopes ${t.slopeAt(x, z).toFixed(2)} rad`);
+    assert(t.padFactor(x, z) > 0.85, `${name} is not flattened`);
+  }
+});
+
+check('the roads are walkable end to end', () => {
+  const t = createTerrain(3);
+  for (const road of ROADS) {
+    for (let i = 0; i < road.points.length - 1; i++) {
+      const [ax, az] = road.points[i], [bx, bz] = road.points[i + 1];
+      const steps = Math.ceil(Math.hypot(bx - ax, bz - az));
+      for (let k = 0; k <= steps; k++) {
+        const u = k / steps;
+        const x = ax + (bx - ax) * u, z = az + (bz - az) * u;
+        // A road you cannot walk up is a wall with cobbles on it.
+        assert(t.slopeAt(x, z) < 0.36,
+          `${road.name} slopes ${t.slopeAt(x, z).toFixed(2)} rad at ${x.toFixed(0)},${z.toFixed(0)}`);
+        assert(t.heightAt(x, z) > 0.5, `${road.name} is under water at ${x.toFixed(0)},${z.toFixed(0)}`);
+      }
+    }
+  }
+});
+
+check('the city has walls, and the walls have gates you can walk through', () => {
+  const w = createWorld({ seed: 4, props: 0, beasts: false });
+  const body = { pos: new Float32Array(3), vel: new Float32Array(3) };
+  const free = (x, z) => {
+    body.pos[0] = x; body.pos[1] = w.terrain.heightAt(x, z); body.pos[2] = z;
+    resolveObstacles(body, w.obstacles);
+    return Math.hypot(body.pos[0] - x, body.pos[2] - z) < 0.05;
+  };
+  for (const [name, at] of Object.entries(w.gates)) {
+    assert(free(at[0], at[1]), `the ${name} gate is blocked`);
+  }
+  // And the wall between the gates is not walk-through-able: sample the ring
+  // away from both openings and count how much of it is solid.
+  let solid = 0, tried = 0;
+  for (let i = 0; i < 40; i++) {
+    const a = (i / 40) * Math.PI * 2;
+    // Skip the two gates and their jambs.
+    const near = [Math.PI / 2, Math.PI].some((g) => Math.abs(((a - g + Math.PI * 3) % (Math.PI * 2)) - Math.PI) < 0.3);
+    if (near) continue;
+    tried++;
+    if (!free(Math.cos(a) * 26, Math.sin(a) * 34)) solid++;
+  }
+  assert(solid === tried, `${tried - solid} of ${tried} points on the curtain wall were open air`);
+});
+
+check('every townsperson is standing somewhere a person could stand', () => {
+  for (const seed of [1, 2, 5]) {
+    const w = createWorld({ seed, props: 200 });
+    const body = { pos: new Float32Array(3), vel: new Float32Array(3) };
+    for (const p of w.people) {
+      body.pos.set(p.pos);
+      resolveObstacles(body, w.obstacles);
+      const moved = Math.hypot(body.pos[0] - p.pos[0], body.pos[2] - p.pos[2]);
+      assert(moved < 0.05, `${p.id} is inside geometry on seed ${seed} (pushed ${moved.toFixed(2)} m)`);
+      assert(w.terrain.slopeAt(p.pos[0], p.pos[2]) < 0.5, `${p.id} is standing on a cliff`);
+    }
+  }
+});
+
+check('the quest crates are outside the walls and on a road', () => {
+  const w = createWorld({ seed: 1, props: 0 });
+  const [cx, , cz] = w.crates[0].pos;
+  assert(w.terrain.padFactor(cx, cz) > 0.4, 'the crates are not on the road');
+  // Outside the curtain wall: the point of the errand is that it takes you out
+  // of the city and back.
+  assert(Math.hypot(cx / 26, cz / 34) > 1.1, 'the crates are inside the walls');
 });
 
 // --- the character sheet ------------------------------------------------------

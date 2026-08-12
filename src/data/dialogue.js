@@ -24,7 +24,7 @@ export const DIALOGUE = {
       id: 'harl.ore',
       when: (c) => c.has('met:harl'),
       text: 'Two crates short — stolen?',
-      reply: 'Taken on the north road, and the Watch says wolves. Wolves do not carry crates.',
+      reply: 'Taken on the farm road past the fork, and the Watch says wolves. Wolves do not carry crates.',
       once: true,
       effects: [{ kind: 'flag', flag: 'knows:ore_theft' }, { kind: 'quest', quest: 'q_ore', stage: 'told' }],
     },
@@ -182,7 +182,7 @@ export const DIALOGUE = {
     {
       id: 'watch.sworn',
       when: (c) => c.guild === 'watch',
-      text: 'Anything on the north road today?',
+      text: 'Anything on the farm road today?',
       reply: 'Nothing the two of us cannot handle.',
     },
     {

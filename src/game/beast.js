@@ -27,13 +27,13 @@ export const BEASTS = {
   },
 };
 
-export function createBeast(kind, x, z, terrain) {
+export function createBeast(kind, x, z, terrain, rng = Math.random) {
   const def = BEASTS[kind];
   const f = createFighter({
     hp: def.hp, armor: def.armor, str: def.str, skill: def.skill,
     poise: def.poise, weapon: def.weapon, pos: [x, terrain.heightAt(x, z), z],
   });
-  f.kind = kind; f.def = def; f.rest = 0; f.think = 0; f.circle = Math.random() < 0.5 ? 1 : -1;
+  f.kind = kind; f.def = def; f.rest = 0; f.think = 0; f.circle = rng() < 0.5 ? 1 : -1;
   return f;
 }
 
@@ -45,7 +45,7 @@ export function createBeast(kind, x, z, terrain) {
  * and is also why it can be baited: whatever it decided, it is committed to for
  * a fraction of a second.
  */
-export function stepBeast(b, player, terrain, dt) {
+export function stepBeast(b, player, terrain, dt, rng = Math.random) {
   if (b.state === S.DEAD) return b;
   const def = b.def;
   const dx = player.pos[0] - b.pos[0], dz = player.pos[2] - b.pos[2];
@@ -56,7 +56,7 @@ export function stepBeast(b, player, terrain, dt) {
   if (b.think > 0) b.think--;
   else {
     b.think = 24;
-    b.circle = Math.random() < 0.25 ? -b.circle : b.circle;
+    b.circle = rng() < 0.25 ? -b.circle : b.circle;
   }
 
   // Turn toward the player at a finite rate. A creature that snaps to face you
@@ -82,7 +82,7 @@ export function stepBeast(b, player, terrain, dt) {
     }
   }
 
-  stepFighter(b, intent, Math.random);
+  stepFighter(b, intent, rng);
   b.pos[1] = terrain.heightAt(b.pos[0], b.pos[2]);
   return b;
 }

@@ -49,6 +49,9 @@ What exists, and the command that proves it:
 | People | Six townsfolk, three of them walking routes with a pause and a turn at each end | `npm run play` |
 | Combat | The §6.2 state machine in ticks: wind-up, active, recovery, a nine-tick parry window, poise, stagger with an immunity window, knockback, combos you earn by connecting, and no way out of a swing you started | `npm test`, `npm run play` |
 | Beasts | Wolves and boar out past the fields, never in town; one decision every 0.4 s, a visible tell before the lunge, and a body that drops and reaches while it winds up | `npm test` |
+| Character sheet | Experience, levels, learning points on the five-band curve, weapon percentages, one-way guild oaths, and a rule that nothing can raise a number without naming its source | `npm test` |
+| Conversations | A dialogue graph gated by flags, gold, guild and quest state; trainers who name a price and a ceiling; a parchment panel driven by number keys | `npm run play` |
+| Quests | Told in town, advanced by doing — the stolen ore is found by walking to it, the pack is cleared by killing it | `npm test` |
 | Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
 | Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
@@ -119,6 +122,15 @@ which was found by watching the harness rather than by playing:
 
 Before those three, hold-the-button beat space-and-parry at every skill level.
 After them the spacer wins 80–100%.
+
+## What the validators check
+
+`npm test` will not let content rot quietly. Every conversation must have a way
+out and a door that closes behind you; every `when` clause must survive both an
+empty world and a maximal one; every flag written must be read *somewhere*,
+including by the world code rather than only by another conversation; every
+speaker must exist; and no number anywhere can rise without naming its source —
+the error for that one quotes the pillar it breaks.
 
 ## The frame-time probe
 

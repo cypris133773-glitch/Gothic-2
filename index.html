@@ -20,6 +20,16 @@
 
 <div id="overlay"></div>
 
+<!-- Conversations are text, and text is what the DOM is for. The canvas draws
+     the world; a talking-head panel over it is one element and reflows itself
+     on a phone, which a canvas-drawn one would not. -->
+<div id="talk" hidden>
+  <p id="talk-who"></p>
+  <p id="talk-reply"></p>
+  <ol id="talk-options"></ol>
+  <p id="talk-hint">1–9 to speak · T to train · Esc to end</p>
+</div>
+
 <script type="module" src="src/main.js"></script>
 </body>
 </html>

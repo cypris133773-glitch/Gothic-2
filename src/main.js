@@ -91,6 +91,13 @@ async function boot() {
         hits: world.player.fighter.hits, combo: world.player.fighter.combo,
       },
       xp: world.player.xp, level: world.player.level,
+      talking: world.dialogue.isOpen,
+      options: world.dialogue.active ? world.dialogue.active.options.map((o) => o.id) : [],
+      reply: world.dialogue.active ? world.dialogue.active.reply : null,
+      gold: world.character.gold, lp: world.character.lp,
+      skills: { ...world.character.skills }, guild: world.character.guild,
+      flags: [...world.flags],
+      trainer: world.openTrainer ? world.openTrainer.skill : null,
       beasts: world.beasts.map((b) => ({ kind: b.kind, hp: b.hp, state: b.state,
         dist: +Math.hypot(b.pos[0] - world.player.pos[0], b.pos[2] - world.player.pos[2]).toFixed(2) })),
       clock: world.clock.hhmm, ticks: world.ticks, frames: api.frames,
@@ -100,7 +107,44 @@ async function boot() {
   };
   window.GRIMWARD = api;
 
-  addEventListener('keydown', (e) => { if (e.code === 'F3') overlay.toggle(); });
+  // --- conversations ---------------------------------------------------------
+  const talkEl = document.getElementById('talk');
+  const whoEl = document.getElementById('talk-who');
+  const replyEl = document.getElementById('talk-reply');
+  const optionsEl = document.getElementById('talk-options');
+
+  function renderTalk() {
+    const active = world.dialogue.active;
+    if (!active) { talkEl.hidden = true; return; }
+    talkEl.hidden = false;
+    const trainer = world.openTrainer;
+    whoEl.textContent = (active.npc.kitName || active.npc.kit?.name || active.npc.id)
+      + (trainer ? `  ·  teaching ${trainer.skill}` : '');
+    replyEl.textContent = active.reply || '';
+    optionsEl.replaceChildren(...active.options.map((o, i) => {
+      const li = document.createElement('li');
+      const b = document.createElement('b');
+      b.textContent = `${i + 1}.`;
+      li.append(b, document.createTextNode(o.text));
+      return li;
+    }));
+  }
+
+  addEventListener('keydown', (e) => {
+    if (e.code === 'F3') { overlay.toggle(); return; }
+
+    if (world.dialogue.isOpen) {
+      if (e.code === 'Escape') { world.dialogue.close(); renderTalk(); return; }
+      if (e.code === 'KeyT') { const r = world.train(); log(r.ok ? `learned: ${r.value ?? 'yes'}` : r.why); renderTalk(); return; }
+      const n = Number(e.key);
+      if (n >= 1 && n <= 9) { world.dialogue.say(n - 1); renderTalk(); }
+      return;
+    }
+    // E opens a conversation with whoever is in front of you. Nothing happens
+    // if there is nobody there, which is the correct amount of feedback for a
+    // key pressed at an empty street.
+    if (e.code === 'KeyE') { if (world.talk()) renderTalk(); }
+  });
 
   const sizeFor = () => {
     const scale = renderScale || (tier === 'low' ? 0.8 : Math.min(devicePixelRatio || 1, 2));
@@ -206,6 +250,9 @@ async function boot() {
         fight: `${STATE_NAME[pl.fighter.state]}${pl.fighter.t ? ` ${pl.fighter.t}` : ''}`
           + `  hp ${pl.fighter.hp}/${pl.fighter.maxHp}  combo ${pl.fighter.combo}`,
         hunt: `${world.beasts.filter((b) => b.state !== 7).length} alive  xp ${pl.xp}  level ${pl.level}`,
+        sheet: `${world.character.gold} gold  ${world.character.lp} LP  1H ${world.character.skills.oneHanded}%`
+          + `${world.character.guild ? `  ${world.character.guild}` : ''}`,
+        near: world.dialogue.isOpen ? 'talking' : (world.speaker() ? 'E to talk' : ''),
         clock: `day ${world.clock.day} ${world.clock.hhmm}${world.clock.isNight ? ' (night)' : ''}`,
         terrain: `cell ${terrainCell}  rebuilt in ${terrainMs} ms`,
         seed: String(world.seed),

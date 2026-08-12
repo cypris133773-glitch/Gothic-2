@@ -31,3 +31,21 @@ html, body {
   white-space: pre; font-size: 12px; line-height: 1.45;
   color: #9ad07a; text-shadow: 0 1px 2px #000;
 }
+
+/* The conversation panel. Parchment and ink, not glass and neon (§10.6). */
+#talk {
+  position: fixed; left: 50%; bottom: 4vh; transform: translateX(-50%);
+  width: min(52rem, 92vw); padding: 18px 22px;
+  background: rgba(14, 12, 9, 0.92);
+  border: 1px solid #4a3f2c; border-radius: 3px;
+  color: #d8cbae; font-size: 15px; line-height: 1.5;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+#talk[hidden] { display: none; }
+#talk-who { color: #c8a45c; letter-spacing: 0.06em; text-transform: uppercase; font-size: 12px; }
+#talk-reply { margin: 8px 0 14px; color: #efe4c8; }
+#talk-reply:empty { display: none; }
+#talk-options { list-style: none; }
+#talk-options li { padding: 3px 0; color: #b9ad92; }
+#talk-options li b { color: #c8a45c; margin-right: 8px; }
+#talk-hint { margin-top: 12px; font-size: 12px; color: #6e6552; }

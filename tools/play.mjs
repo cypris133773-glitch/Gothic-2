@@ -103,7 +103,14 @@ async function main() {
     // run where every actual check passed. Wait for the exit, then retry.
     await new Promise((r) => (child.exitCode === null ? child.once('exit', r) : r()));
     if (!has('keep')) {
-      fs.rmSync(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
+      // A profile the browser is still flushing is not a test result. Retry,
+      // and if it still will not go, leave it in the temp directory rather than
+      // failing a run in which every check passed.
+      try {
+        fs.rmSync(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 200 });
+      } catch (e) {
+        console.log(`  (left ${profile} behind: ${e.code})`);
+      }
     }
   };
 
@@ -212,6 +219,39 @@ async function main() {
       `state ${settled.combat.state}, ${settled.combat.swings} swings total`);
     ok('there are beasts in the world', settled.beasts.length > 0,
       `${settled.beasts.length}: ${settled.beasts.slice(0, 3).map((b) => `${b.kind} at ${b.dist} m`).join(', ')}`);
+
+    // --- a conversation, through real key events ---------------------------
+    // Walk to the smith and talk to him. Everything here goes through the same
+    // key path a player uses; nothing calls world.talk().
+    const smith = await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      const n = w.people.find((p) => p.id === 'npc3');
+      return n ? [n.pos[0], n.pos[2]] : null;
+    })()`);
+    ok('the smith is in the world', !!smith, smith ? `at ${smith.map((v) => v.toFixed(1))}` : '');
+
+    // Put the player in front of him, then use only keys from here on.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      const n = w.people.find((p) => p.id === 'npc3');
+      w.player.pos[0] = n.pos[0]; w.player.pos[2] = n.pos[2] - 1.5; w.player.yaw = 0;
+    })()`);
+    await sleep(120);
+    await page.keyDown('KeyE'); await page.keyUp('KeyE');
+    await sleep(150);
+    const talking = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('E opens a conversation', talking.talking, `${talking.options.length} things to say`);
+
+    await page.keyDown('Digit1'); await page.keyUp('Digit1');
+    await sleep(150);
+    const said = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a chosen line is answered', !!said.reply, said.reply ? said.reply.slice(0, 48) + '…' : '');
+    ok('and it changed the world', said.flags.includes('met:harl'));
+
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(120);
+    const closed = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('Escape ends the conversation', !closed.talking);
 
     // --- the world keeps time ---------------------------------------------
     ok('the clock is running', /^\d\d:\d\d$/.test(landed.clock), landed.clock);

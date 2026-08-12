@@ -23,6 +23,8 @@ const DEFAULT_BINDINGS = {
   walk: ['ShiftLeft'],
   attack: ['KeyF'],
   block: ['KeyG'],
+  talk: ['KeyE'],
+  train: ['KeyT'],
 };
 
 export function createInput(canvas, opts = {}) {

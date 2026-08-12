@@ -18,6 +18,9 @@ import { makeRng } from '../core/rng.js';
 import { createFighter, stepFighter, resolveStrike, isStriking, S } from '../game/combat.js';
 import { createBeast, stepBeast, poseBeast, BEASTS } from '../game/beast.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
+import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
+import { createDialogue } from '../game/dialogue.js';
+import { DIALOGUE, SPEAKERS } from '../data/dialogue.js';
 
 export const CHUNK = 64;         // metres per terrain chunk
 // Vertices per side by ring: dense underfoot, coarse at the horizon. The last
@@ -142,6 +145,11 @@ export function createWorld(opts = {}) {
   const seed = opts.seed || 1;
   const terrain = createTerrain(seed);
   const clock = new Clock((opts.hour ?? 9) * 60);
+  // One seeded stream for everything that happens in a fight. Combat used
+  // Math.random, which meant two runs of the same seed diverged the moment a
+  // blade swung — and the bot tests, which are the only proof the world is
+  // completable, were quietly measuring different worlds each time.
+  const rng = makeRng(seed * 7717 + 3).stream('combat');
 
   // The player starts on the square, which the terrain generator flattens, so a
   // fresh game never begins halfway up a cliff.
@@ -154,11 +162,28 @@ export function createWorld(opts = {}) {
   player.phase = 0;
   const camera = createCamera();
 
+
+  // The character sheet, the flags every conversation reads, and the quest log.
+  // A fresh character has held a sword before, but only just: ten per cent is
+  // the bottom of the rookie band, which is one chained swing and a crit one
+  // time in ten. Everything above it is bought from a trainer (P4).
+  const character = createCharacter({ gold: 260, lp: 10 });
+  character.skills.oneHanded = 10;
+  const flags = new Set();
+  const quests = new Map();
+
   // The player is a fighter as well as a body. Both are needed: one owns where
   // he is standing, the other owns what his blade is doing.
-  player.fighter = createFighter({ hp: 120, str: 25, skill: opts.skill ?? 30, weapon: 'oneHanded' });
+  player.fighter = createFighter({
+    hp: 120, str: character.str + 15,
+    // One number, owned by the sheet. They used to be set independently, so a
+    // character with 0% on paper swung at 30% in the world.
+    skill: opts.skill ?? character.skills.oneHanded,
+    weapon: 'oneHanded',
+  });
   player.fighter.pos = player.pos;              // one position, shared
   player.xp = 0; player.level = 0;
+
 
   const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 260), [-110, -110, 110, 110]);
   const town = (opts.town === false || opts.lineup) ? [] : buildTown(terrain, seed);
@@ -176,18 +201,33 @@ export function createWorld(opts = {}) {
       const a = brng.range(0, Math.PI * 2), r = brng.range(34, 92);
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
       if (terrain.heightAt(x, z) < 1.2 || terrain.slopeAt(x, z) > 0.5) continue;
-      beasts.push(createBeast(brng.chance(0.75) ? 'wolf' : 'boar', x, z, terrain));
+      beasts.push(createBeast(brng.chance(0.75) ? 'wolf' : 'boar', x, z, terrain, brng));
     }
   }
   const beastParts = beasts.map(() => []);
 
+  // The stolen ore, out on the north road. It is a thing in the world rather
+  // than a dialogue flag: the quest is told in town and *found* by walking.
+  const crates = [];
+  if (!opts.lineup) {
+    const cx = 6, cz = -46;
+    const cy = terrain.heightAt(cx, cz);
+    for (let i = 0; i < 3; i++) {
+      crates.push({
+        pos: [cx + i * 0.9 - 0.9, cy + 0.35, cz + (i % 2) * 0.6],
+        yaw: 0.3 * i, pitch: 0, scale: [0.8, 0.7, 0.8],
+        albedo: [0.30, 0.21, 0.12], tex: 10 /* MAT.PLANK */, radius: 0.5,
+      });
+    }
+  }
+
   // Everything the character controller can bump into.
-  const obstacles = [...props, ...town].filter((b) => b.radius || b.box);
+  const obstacles = [...props, ...town, ...crates].filter((b) => b.radius || b.box);
 
   // Scene buffers, reused every frame: the scene is a *view* of the simulation
   // and rebuilding it must not allocate (§8.1.4). The static half never changes;
   // the character half is refilled in place by the rig.
-  const staticBoxes = [...props, ...town].filter((b) => !b.invisible);
+  const staticBoxes = [...props, ...town, ...crates].filter((b) => !b.invisible);
   const boxes = [];
   const playerParts = [];
   const peopleParts = people.map(() => []);
@@ -200,13 +240,117 @@ export function createWorld(opts = {}) {
     skyLight: [0, 0, 0], groundLight: [0, 0, 0],
   };
 
-  return {
+  const world = {
     seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
+    character, flags, quests, chapter: 1, openTrainer: null, log: [],
+
+    /** Experience goes to the sheet, which hands out levels and learning points. */
+    awardXp(amount, reason = 'quest') {
+      const gained = awardXp(character, amount, reason);
+      player.xp = character.xp; player.level = character.level;
+      if (gained) world.log.push(`You are level ${character.level}. ${gained * 10} learning points.`);
+      return gained;
+    },
+
+    setQuest(quest, stage) {
+      quests.set(quest, stage);
+      flags.add(`quest:${quest}:${stage}`);
+      world.log.push(`Quest ${quest}: ${stage}`);
+    },
+
+    joinGuild(guild) {
+      const r = joinGuild(character, guild);
+      if (r.ok) world.log.push(`You are sworn to the ${guild}.`);
+      return r;
+    },
+
+    makeHostile(npc) { if (npc) npc.hostile = true; },
+
+    /**
+     * The world half of the quest log: things that become true by being done
+     * rather than by being said. Cheap to check every tick and the only place
+     * a quest can advance without a conversation.
+     */
+    checkQuests() {
+      // You have to know the ore was taken before a pile of crates in a wood
+      // means anything — which is what `knows:ore_theft` is for, and why the
+      // flag is read here rather than being a note in a conversation.
+      if (quests.get('q_ore') === 'told' && flags.has('knows:ore_theft') && crates.length) {
+        const d = Math.hypot(player.pos[0] - crates[0].pos[0], player.pos[2] - crates[0].pos[2]);
+        if (d < 3) world.setQuest('q_ore', 'found');
+      }
+      if (quests.get('q_wolves') === 'told') {
+        const dead = beasts.filter((b) => b.kind === 'wolf' && b.state === S.DEAD).length;
+        if (dead >= 4) world.setQuest('q_wolves', 'cleared');
+      }
+    },
+
+    /**
+     * Buy what a trainer is offering. This is the only path in the game that
+     * can raise a skill, and it is deliberately separate from the conversation
+     * that opened the offer: talking is free, learning costs learning points.
+     */
+    train(step) {
+      const offer = world.openTrainer;
+      if (!offer) return { ok: false, why: 'nobody is teaching' };
+      const skill = offer.skill;
+      const amount = step ?? offer.step ?? 1;
+      const current = character.skills[skill] ?? 0;
+      if (offer.max != null && current >= offer.max) {
+        return { ok: false, why: `they can teach you no further than ${offer.max}%` };
+      }
+      const room = offer.max != null ? Math.min(amount, offer.max - current) : amount;
+      const r = learn(character, skill, room, 'trainer');
+      if (r.ok) {
+        world.log.push(`${skill} ${r.value != null ? `is now ${r.value}%` : 'learned'} (${r.cost} LP)`);
+        if (skill === 'oneHanded') player.fighter.skill = character.skills.oneHanded;
+      }
+      return r;
+    },
+
+    raise(attr, points = 1) {
+      const r = raiseAttribute(character, attr, points, 'trainer');
+      if (r.ok) {
+        world.log.push(`${attr} is now ${r.value} (${r.cost} LP)`);
+        if (attr === 'str') player.fighter.str = character.str;
+      }
+      return r;
+    },
+
+    /** The nearest person close enough and in front of you to talk to. */
+    speaker() {
+      let best = null, bestD = 3.2;
+      for (const p of people) {
+        const dx = p.pos[0] - player.pos[0], dz = p.pos[2] - player.pos[2];
+        const d = Math.hypot(dx, dz);
+        if (d > bestD) continue;
+        let off = Math.atan2(dx, dz) - player.yaw;
+        while (off > Math.PI) off -= Math.PI * 2;
+        while (off < -Math.PI) off += Math.PI * 2;
+        if (Math.abs(off) > 1.1) continue;        // you talk to people you face
+        best = p; bestD = d;
+      }
+      return best;
+    },
+
+    /** Open a conversation with whoever is in front of the player. */
+    talk() {
+      const npc = world.speaker();
+      if (!npc) return null;
+      const nodes = DIALOGUE[SPEAKERS[npc.id]];
+      if (!nodes) return null;
+      world.openTrainer = null;
+      return dialogue.start(npc, nodes);
+    },
 
     /** One simulation step. `intent` is what the player (or a bot) asked for. */
     tick(dt, intent = idleIntent()) {
       this.ticks++;
       clock.tick(dt);
+      // The world keeps running during a conversation — time passes, people
+      // walk past, and a wolf that wanders up is still a wolf (§6.5) — but the
+      // player neither moves nor swings while he is talking.
+      if (dialogue.isOpen) intent = idleIntent();
       stepPlayer(player, intent, terrain, obstacles, dt);
       advanceGait(player, dt);
 
@@ -217,15 +361,15 @@ export function createWorld(opts = {}) {
       f.facing = player.yaw;
       const swinging = f.state === S.WINDUP || f.state === S.ACTIVE || f.state === S.STAGGER;
       if (swinging) { player.vel[0] *= 0.25; player.vel[2] *= 0.25; }
-      stepFighter(f, intent, Math.random);
+      stepFighter(f, intent, rng);
 
       for (const b of beasts) {
-        stepBeast(b, player, terrain, dt);
-        if (isStriking(b)) resolveStrike(b, f, Math.random, meleeDamage);
+        stepBeast(b, player, terrain, dt, rng);
+        if (isStriking(b)) resolveStrike(b, f, rng, meleeDamage);
       }
       if (isStriking(f)) {
         for (const b of beasts) {
-          const hit = resolveStrike(f, b, Math.random, meleeDamage);
+          const hit = resolveStrike(f, b, rng, meleeDamage);
           if (hit && b.state === S.DEAD && !b.counted) {
             b.counted = true;
             player.xp += b.def.xp;
@@ -244,6 +388,7 @@ export function createWorld(opts = {}) {
       for (const b of beasts) b.pos[1] = terrain.heightAt(b.pos[0], b.pos[2]);
 
       for (const p of people) stepPerson(p, terrain, dt);
+      world.checkQuests();
       stepCamera(camera, player, terrain, obstacles, dt);
       return this;
     },
@@ -324,6 +469,11 @@ export function createWorld(opts = {}) {
       return scene;
     },
   };
+
+  // The conversation runner needs the world it edits, so it is built last.
+  const dialogue = createDialogue(world);
+  world.dialogue = dialogue;
+  return world;
 }
 
 /** The same world with no renderer attached, for bots and tests. */

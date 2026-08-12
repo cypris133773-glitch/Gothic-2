@@ -22,6 +22,12 @@ import {
   PARRY_TICKS, PARRY_STAGGER, STAGGER_TICKS, MIN_TELEGRAPH, WHIFF_RECOVERY,
 } from '../src/game/combat.js';
 import { duelSeries } from '../src/game/duel.js';
+import {
+  createCharacter, awardXp, learn, raiseAttribute, joinGuild, knows, canWield, SKILLS, xpToNext,
+} from '../src/game/character.js';
+import { EFFECT_KINDS } from '../src/game/dialogue.js';
+import { DIALOGUE, SPEAKERS } from '../src/data/dialogue.js';
+import { readFileSync } from 'node:fs';
 
 let passed = 0;
 const failures = [];
@@ -808,6 +814,19 @@ check('the loop closes: a bot can walk out, fight, and earn from it', () => {
   if (alive < 7) assert(w.player.xp > 0, 'killing a beast earned no experience');
 });
 
+check('a fight is reproducible from the seed', () => {
+  // Combat used Math.random until the hunt bot started reporting a different
+  // outcome every run — sometimes clearing the wood, sometimes dying with two
+  // beasts left. A simulation the bots cannot repeat cannot prove anything.
+  const play = () => {
+    const w = createWorld({ seed: 3, props: 40, beasts: 5 });
+    hunt(w, 90);
+    const f = w.player.fighter;
+    return [f.hp, f.hits, f.crits, w.beasts.filter((b) => b.state === S.DEAD).length].join(',');
+  };
+  eq(play(), play(), 'two runs of the same seed diverged');
+});
+
 check('the woods are dangerous', () => {
   // A bot that walks into a pack and holds the attack button should not stroll
   // out unhurt. If this ever passes trivially, the creatures have stopped
@@ -825,6 +844,213 @@ check('nothing is placed on the market square', () => {
     const d = Math.hypot(b.pos[0], b.pos[2]);
     assert(d > 25, `a ${b.kind} spawned ${d.toFixed(1)} m from the well`);
   }
+});
+
+// --- the character sheet ------------------------------------------------------
+
+check('experience buys levels, and levels buy learning points', () => {
+  const c = createCharacter();
+  eq(awardXp(c, 499, 'quest'), 0, 'one short of the first level');
+  eq(c.lp, 0, 'no learning points yet');
+  eq(awardXp(c, 1, 'quest'), 1, 'the five hundredth point is a level');
+  eq(c.lp, 10, 'ten learning points a level');
+  eq(c.maxHp, 40 + 12, 'twelve health a level');
+  awardXp(c, 100000, 'quest');
+  eq(c.lp, c.level * 10, 'still ten a level, however many arrive at once');
+});
+
+check('nothing can raise a number without saying where it came from', () => {
+  const c = createCharacter({ lp: 50 });
+  let threw = false;
+  try { raiseAttribute(c, 'str', 1, 'a chest in a wood'); } catch { threw = true; }
+  assert(threw, 'an unnamed source was allowed to make the character stronger');
+  assert(raiseAttribute(c, 'str', 1, 'trainer').ok, 'a trainer is a valid source');
+});
+
+check('a skill costs what the bands say and cannot be bought twice', () => {
+  const c = createCharacter({ lp: 40 });
+  const r = learn(c, 'oneHanded', 20, 'trainer');
+  eq(r.cost, 20, 'twenty points inside the first band cost twenty LP');
+  eq(c.skills.oneHanded, 20, 'and the skill went up');
+  eq(c.lp, 20, 'and the points came out');
+  assert(learn(c, 'sneak', 1, 'trainer').ok, 'sneak is learnable');
+  assert(knows(c, 'sneak'), 'and known afterwards');
+  assert(!learn(c, 'sneak', 1, 'trainer').ok, 'and not learnable twice');
+});
+
+check('learning points run out', () => {
+  const c = createCharacter({ lp: 3 });
+  const r = learn(c, 'oneHanded', 20, 'trainer');
+  assert(!r.ok && r.why.includes('learning points'), `expected a refusal, got ${JSON.stringify(r)}`);
+  eq(c.skills.oneHanded, 0, 'and nothing was learned');
+  eq(c.lp, 3, 'and nothing was spent');
+});
+
+check('a weapon requirement is permission, not a modifier', () => {
+  const c = createCharacter({ str: 10 });
+  const sword = { str: 30, damage: 60 };
+  assert(!canWield(c, sword).ok, 'a ten-strength character should not lift a thirty-strength sword');
+  c.str = 30;
+  assert(canWield(c, sword).ok, 'and should the moment they can');
+});
+
+check('a guild is a door that closes', () => {
+  const c = createCharacter();
+  assert(joinGuild(c, 'watch').ok, 'joining works once');
+  assert(!joinGuild(c, 'ember').ok, 'and never again');
+  eq(c.guild, 'watch', 'the first oath stands');
+});
+
+// --- the conversations --------------------------------------------------------
+
+check('every conversation is well formed', () => {
+  for (const [who, nodes] of Object.entries(DIALOGUE)) {
+    const ids = new Set();
+    for (const n of nodes) {
+      assert(n.id, `${who} has a node with no id`);
+      assert(!ids.has(n.id), `${who} has two nodes called ${n.id}`);
+      ids.add(n.id);
+      assert(n.text && n.reply, `${n.id} has nothing to say or no answer`);
+      for (const e of n.effects || []) {
+        assert(EFFECT_KINDS.includes(e.kind), `${n.id} uses unknown effect "${e.kind}"`);
+      }
+    }
+    assert(nodes.some((n) => n.ends), `${who} has no way out of the conversation`);
+    assert(nodes.some((n) => n.once), `${who} has no door that closes behind you`);
+  }
+});
+
+check('every condition survives a world where nothing has happened', () => {
+  // A `when` that throws on an empty world is a crash on the first playthrough,
+  // which is the one everybody has.
+  const empty = {
+    has: () => false, gold: 0, guild: null, level: 0, lp: 0, chapter: 1,
+    skill: () => 0, knows: () => false, flags: new Set(), npc: null,
+  };
+  const rich = {
+    has: () => true, gold: 99999, guild: 'watch', level: 40, lp: 200, chapter: 4,
+    skill: () => 100, knows: () => true, flags: new Set(), npc: null,
+  };
+  for (const [who, nodes] of Object.entries(DIALOGUE)) {
+    for (const n of nodes) {
+      if (!n.when) continue;
+      for (const [name, ctx] of [['empty', empty], ['rich', rich]]) {
+        try { n.when(ctx); } catch (e) { throw new Error(`${who}/${n.id} threw on the ${name} world: ${e.message}`); }
+      }
+    }
+  }
+});
+
+check('every flag a conversation writes is read by something', () => {
+  // "Something" includes the world, not only another conversation: a quest
+  // stage set in dialogue is usually read by the code that advances it. The
+  // first version of this check only looked at `when` clauses and reported
+  // three healthy flags as orphans.
+  const written = new Set(), read = new Set();
+  for (const file of ['../src/world/world.js', '../src/game/quests.js']) {
+    let src = '';
+    try { src = readFileSync(new URL(file, import.meta.url), 'utf8'); } catch { continue; }
+    for (const m2 of src.matchAll(/'([a-z_]+:[a-z_:0-9]+)'/gi)) read.add(m2[1]);
+    for (const m2 of src.matchAll(/quests\.get\('([a-z_0-9]+)'\)\s*===\s*'([a-z_0-9]+)'/gi)) {
+      read.add(`quest:${m2[1]}:${m2[2]}`);
+    }
+  }
+  for (const nodes of Object.values(DIALOGUE)) {
+    for (const n of nodes) {
+      for (const e of n.effects || []) {
+        if (e.kind === 'flag') written.add(e.flag);
+        if (e.kind === 'quest') written.add(`quest:${e.quest}:${e.stage}`);
+      }
+      // The conditions are closures, so what they read is recovered from their
+      // source. Crude, and it is the only way to check this without a DSL —
+      // which is a trade the brief makes deliberately (§6.5).
+      if (n.when) for (const m of n.when.toString().matchAll(/'([^']+)'/g)) read.add(m[1]);
+    }
+  }
+  const orphans = [...written].filter((f) => !read.has(f) && !f.endsWith(':done'));
+  assert(orphans.length === 0, `flags written and never read: ${orphans.join(', ')}`);
+});
+
+check('every speaker exists in the world and has something to say', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  for (const [npcId, conversation] of Object.entries(SPEAKERS)) {
+    assert(DIALOGUE[conversation], `${npcId} points at a conversation that does not exist`);
+    assert(w.people.some((p) => p.id === npcId), `${npcId} speaks but is not in the world`);
+  }
+});
+
+check('a conversation runs, and its doors close behind you', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  const smith = w.people.find((p) => p.id === 'npc3');
+  w.player.pos[0] = smith.pos[0]; w.player.pos[2] = smith.pos[2] - 1.6; w.player.yaw = 0;
+
+  const open = w.talk();
+  assert(open, 'the smith would not talk');
+  eq(open.options[0].id, 'harl.greet', 'the greeting comes first');
+  w.dialogue.say(0);
+  assert(w.flags.has('met:harl'), 'the greeting did not set its flag');
+  assert(!w.dialogue.active.options.some((o) => o.id === 'harl.greet'), 'you can greet him twice');
+  assert(w.dialogue.active.options.some((o) => o.id === 'harl.train_ask'), 'the training door did not open');
+});
+
+check('you cannot talk to someone you are not facing', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  const smith = w.people.find((p) => p.id === 'npc3');
+  w.player.pos[0] = smith.pos[0]; w.player.pos[2] = smith.pos[2] - 1.6;
+  w.player.yaw = Math.PI;                    // back turned
+  assert(!w.speaker(), 'the smith was reachable through the back of the player\'s head');
+  w.player.pos[2] = smith.pos[2] - 12;       // too far
+  w.player.yaw = 0;
+  assert(!w.speaker(), 'the smith was reachable from twelve metres away');
+});
+
+check('training costs coin and learning points, and stops where the trainer stops', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  const smith = w.people.find((p) => p.id === 'npc3');
+  w.player.pos[0] = smith.pos[0]; w.player.pos[2] = smith.pos[2] - 1.6; w.player.yaw = 0;
+  // Enough levels that the *smith's* ceiling is what stops the training, not
+  // the purse. The first version of this test awarded 6000 and asserted 45%:
+  // it stopped at 40% because 0→45 costs sixty learning points and four levels
+  // is fifty. The test was wrong and the game was right.
+  w.awardXp(30000, 'debug');
+  const goldBefore = w.character.gold;
+
+  w.talk();
+  const pick = (id) => {
+    const i = w.dialogue.active.options.findIndex((o) => o.id === id);
+    assert(i >= 0, `${id} was not on offer`);
+    w.dialogue.say(i);
+  };
+  pick('harl.greet'); pick('harl.train_ask'); pick('harl.train');
+  eq(w.character.gold, goldBefore - 200, 'the lesson was not paid for');
+  assert(w.openTrainer && w.openTrainer.skill === 'oneHanded', 'no trainer was opened');
+
+  assert(w.character.lp >= 60, `the fixture needs at least 60 LP, has ${w.character.lp}`);
+  const before = w.character.skills.oneHanded;
+  const r = w.train();
+  assert(r.ok, `training refused: ${r.why}`);
+  assert(w.character.skills.oneHanded > before, 'the skill did not move');
+  eq(w.player.fighter.skill, w.character.skills.oneHanded, 'the fighter did not learn what the character did');
+
+  for (let i = 0; i < 40; i++) w.train();
+  eq(w.character.skills.oneHanded, 45, 'the smith taught past his own ceiling');
+  assert(!w.train().ok, 'and did not refuse afterwards');
+});
+
+check('the guild door needs the whole chain, not just the asking', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  const guard = w.people.find((p) => p.id === 'npc0');
+  w.player.pos[0] = guard.pos[0]; w.player.pos[2] = guard.pos[2] - 1.6; w.player.yaw = 0;
+  w.talk();
+  const ids = () => w.dialogue.active.options.map((o) => o.id);
+  w.dialogue.say(ids().indexOf('watch.greet'));
+  w.dialogue.say(ids().indexOf('watch.join_ask'));
+  assert(!ids().includes('watch.join'), 'the Watch took him without the smith vouching');
+  w.flags.add('harl:trusts');
+  w.talk();                                   // reopen with the new flag
+  assert(w.dialogue.active.options.some((o) => o.id === 'watch.join'), 'the door never opened');
+  w.dialogue.say(w.dialogue.active.options.findIndex((o) => o.id === 'watch.join'));
+  eq(w.character.guild, 'watch', 'the oath was not taken');
 });
 
 // --- report ------------------------------------------------------------------

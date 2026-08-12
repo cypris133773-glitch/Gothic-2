@@ -30,6 +30,8 @@ import { DIALOGUE, SPEAKERS } from '../src/data/dialogue.js';
 import { readFileSync } from 'node:fs';
 import { snapshot, restore, migrate, SAVE_VERSION, MIGRATIONS, createStorage } from '../src/core/save.js';
 import { goldenPath } from './sim.mjs';
+import { ITEMS, TRADERS, DROPS, KIND } from '../src/data/items.js';
+import { buyPrice, sellPrice } from '../src/game/inventory.js';
 
 let passed = 0;
 const failures = [];
@@ -1164,6 +1166,132 @@ check('the game can be played from the first line to a guild oath', () => {
   eq(r.world.character.guild, 'watch', 'the oath was not taken');
   assert(r.world.character.skills.oneHanded > 10, 'no training was bought');
   assert(r.world.character.xp >= 650, `only ${r.world.character.xp} experience earned`);
+});
+
+// --- what you carry -----------------------------------------------------------
+
+check('every item is well formed and every drop and stock entry exists', () => {
+  for (const [id, it] of Object.entries(ITEMS)) {
+    assert(it.name, `${id} has no name`);
+    assert(Object.values(KIND).includes(it.kind), `${id} has kind "${it.kind}"`);
+    if (it.kind === KIND.WEAPON) assert(it.damage > 0 && it.class, `${id} is a weapon that cannot hit`);
+    if (it.kind === KIND.ARMOUR) assert(it.prot >= 0, `${id} has no protection`);
+    assert(typeof it.value === 'number', `${id} has no value`);
+  }
+  for (const [beast, drops] of Object.entries(DROPS)) {
+    for (const d of drops) assert(ITEMS[d.item], `${beast} drops "${d.item}", which does not exist`);
+  }
+  for (const [who, t] of Object.entries(TRADERS)) {
+    for (const [id] of t.stock) assert(ITEMS[id], `${who} stocks "${id}", which does not exist`);
+    assert(t.gold > 0 && t.buys.length, `${who} cannot trade`);
+  }
+});
+
+check('a requirement is a door, not a discount', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.give('militia_sword');
+  const refused = w.equip('militia_sword');
+  assert(!refused.ok && refused.why.includes('30 strength'),
+    `expected a refusal naming the requirement, got ${JSON.stringify(refused)}`);
+  const damageBefore = w.player.fighter.weapon.damage;
+  w.character.str = 30;
+  assert(w.equip('militia_sword').ok, 'thirty strength should open the door');
+  assert(w.player.fighter.weapon.damage > damageBefore * 2, 'the sword did not reach the hand');
+});
+
+check('guild armour needs the guild, not the coin', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.give('watch_mail');
+  w.character.str = 40;
+  const r = w.equip('watch_mail');
+  assert(!r.ok && r.why.includes('watch'), `expected a guild refusal, got ${JSON.stringify(r)}`);
+  w.joinGuild('watch');
+  assert(w.equip('watch_mail').ok, 'a sworn member should be able to wear the mail');
+  eq(w.player.fighter.armor, ITEMS.watch_mail.prot, 'the protection did not apply');
+});
+
+check('the skill that matters is the one for the weapon in your hand', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.character.skills.oneHanded = 45;
+  w.character.skills.twoHanded = 0;
+  w.character.str = 60;
+  w.give('war_axe'); w.give('militia_sword');
+  w.equip('militia_sword');
+  eq(w.player.fighter.skill, 45, 'the sword should use the one-handed skill');
+  w.equip('war_axe');
+  eq(w.player.fighter.skill, 0, 'a swordsman picking up an axe is a beginner');
+});
+
+check('a hide needs the skinning lesson; a fang does not', () => {
+  const wolf = DROPS.wolf.map((d) => ITEMS[d.item]);
+  assert(wolf.some((it) => it.needs === 'skinning'), 'nothing on a wolf needs skinning');
+  assert(wolf.some((it) => !it.needs), 'everything on a wolf needs skinning');
+});
+
+check('a trader runs out of coin', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.give('wolf_pelt', 200);
+  w.openTrader = 'bosk_hunter';
+  let sold = 0;
+  while (w.sell('wolf_pelt').ok) sold++;
+  const purse = TRADERS.bosk_hunter.gold;
+  assert(sold * sellPrice(ITEMS.wolf_pelt) <= purse, 'the hunter paid out more than he had');
+  assert(sold > 5 && sold < 200, `sold ${sold} pelts — a purse that deep is not a purse`);
+  assert(w.carrying('wolf_pelt'), 'the pelts he could not pay for should still be yours');
+});
+
+check('a trader buys what he deals in and nothing else', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.give('wolf_pelt', 3);
+  w.openTrader = 'harl_smith';
+  assert(!w.sell('wolf_pelt').ok, 'the smith bought a pelt');
+  w.openTrader = 'bosk_hunter';
+  assert(w.sell('wolf_pelt').ok, 'the hunter would not buy a pelt');
+});
+
+check('buying costs what it costs, and empties the shelf', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.character.gold = 1000;
+  w.openTrader = 'harl_smith';
+  const before = w.character.gold;
+  assert(w.buy('militia_sword').ok, 'the sword was not for sale');
+  eq(w.character.gold, before - buyPrice(ITEMS.militia_sword), 'the price was not the price');
+  assert(!w.buy('militia_sword').ok, 'he had a second one');
+});
+
+check('a quest item cannot be sold for coin', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  w.give('ore_crate');
+  w.openTrader = 'harl_smith';
+  assert(!w.sell('ore_crate').ok, 'the stolen ore was sold to the man it was stolen from');
+});
+
+check('a permanent draught is permanent', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 5 });
+  const str = w.character.str;
+  w.give('elixir_str');
+  assert(w.drink('elixir_str').ok, 'the elixir would not go down');
+  eq(w.character.str, str + 1, 'strength did not rise');
+  assert(!w.carrying('elixir_str'), 'the bottle survived being drunk');
+  assert(w.character.ledger.some((e) => e.source === 'permanent-potion'), 'the ledger did not record it');
+});
+
+check('a save carries what you were holding and what the trader had left', () => {
+  const w = createWorld({ seed: 7, beasts: 2, props: 10 });
+  w.character.str = 30;
+  w.give('militia_sword'); w.equip('militia_sword');
+  w.give('wolf_pelt', 4);
+  w.openTrader = 'bosk_hunter';
+  w.sell('wolf_pelt', 2);
+  const traderGold = w.trader('bosk_hunter').gold;
+  const data = w.snapshot();
+
+  const back = createWorld({ seed: 7, beasts: 2, props: 10 });
+  back.restore(data);
+  eq(back.inventory.weapon, 'militia_sword', 'the sword was not in hand');
+  eq(back.player.fighter.weapon.damage, ITEMS.militia_sword.damage, 'the loadout was not reapplied');
+  eq(back.items().find((i) => i.id === 'wolf_pelt').n, 2, 'the pelts');
+  eq(back.trader('bosk_hunter').gold, traderGold, 'the hunter got his coin back');
 });
 
 // --- report ------------------------------------------------------------------

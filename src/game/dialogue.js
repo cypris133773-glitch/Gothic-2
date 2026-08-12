@@ -99,6 +99,15 @@ export function applyEffect(world, effect, npc) {
       // world.train(), which is the only path that can raise a number.
       world.openTrainer = { npc: npc && npc.id, ...effect };
       break;
+    case 'trade':
+      world.openTrader = effect.trader;
+      break;
+    case 'give':
+      world.give(effect.item, effect.n || 1);
+      break;
+    case 'take':
+      world.take(effect.item, effect.n || 1);
+      break;
     case 'quest':
       world.setQuest(effect.quest, effect.stage);
       break;
@@ -114,4 +123,4 @@ export function applyEffect(world, effect, npc) {
 }
 
 /** Every effect kind the engine knows. The validator asserts data uses only these. */
-export const EFFECT_KINDS = ['flag', 'unflag', 'gold', 'xp', 'trainer', 'quest', 'guild', 'hostile'];
+export const EFFECT_KINDS = ['flag', 'unflag', 'gold', 'xp', 'trainer', 'trade', 'give', 'take', 'quest', 'guild', 'hostile'];

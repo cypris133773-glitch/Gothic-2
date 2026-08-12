@@ -15,7 +15,7 @@
 // one, and a file from a version we have never heard of is refused politely
 // rather than loaded into an undefined state.
 
-export const SAVE_VERSION = 2;
+export const SAVE_VERSION = 3;
 export const DB_NAME = 'grimward';
 export const STORE = 'saves';
 
@@ -33,6 +33,14 @@ export const MIGRATIONS = {
     version: 2,
     quests: d.quests || [],
     character: { ...d.character, skills: d.character.skills || { oneHanded: 10 } },
+  }),
+  // v2 had no inventory at all: the game had none. A v2 character comes back
+  // holding what a new one starts with rather than empty-handed and naked.
+  2: (d) => ({
+    ...d,
+    version: 3,
+    inventory: d.inventory || { items: [['branch', 1], ['rags', 1]], weapon: 'branch', armour: 'rags' },
+    traders: d.traders || [],
   }),
 };
 
@@ -58,6 +66,13 @@ export function snapshot(world) {
     },
     flags: [...world.flags],
     quests: [...world.quests.entries()],
+    inventory: {
+      items: [...world.inventory.items.entries()],
+      weapon: world.inventory.weapon,
+      armour: world.inventory.armour,
+    },
+    // A trader's purse and stock are world state: what you sold him is his.
+    traders: world.traderState(),
     // Only the beasts that differ from how the seed made them. The filter runs
     // on the beast, not on the mapped record: the first version mapped first
     // and then compared `b.hp < b.maxHp` on an object that had no maxHp, so
@@ -102,6 +117,12 @@ export function restore(world, data) {
 
   world.quests.clear();
   for (const [k, v] of d.quests) world.quests.set(k, v);
+
+  world.inventory.items = new Map(d.inventory.items);
+  world.inventory.weapon = d.inventory.weapon;
+  world.inventory.armour = d.inventory.armour;
+  world.restoreTraders(d.traders || []);
+  world.reloadout();
 
   for (const b of d.beasts) {
     const beast = world.beasts[b.i];

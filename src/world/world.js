@@ -22,6 +22,11 @@ import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../g
 import { createDialogue } from '../game/dialogue.js';
 import { DIALOGUE, SPEAKERS } from '../data/dialogue.js';
 import { snapshot, restore } from '../core/save.js';
+import {
+  createInventory, add, remove, has, count, equip, unequip, drink, applyLoadout,
+  createTrader, buy, sell, listing,
+} from '../game/inventory.js';
+import { DROPS, ITEMS, item } from '../data/items.js';
 
 const ticksToSeconds = (t) => t / 60;
 
@@ -174,6 +179,12 @@ export function createWorld(opts = {}) {
   character.skills.oneHanded = 10;
   const flags = new Set();
   const quests = new Map();
+  // What you start with: rags, a branch, and one draught. Everything else is
+  // earned, bought or taken.
+  const inventory = createInventory({ branch: 1, rags: 1, healing_draught: 1 });
+  inventory.weapon = 'branch';
+  inventory.armour = 'rags';
+  const traders = new Map();
 
   // The player is a fighter as well as a body. Both are needed: one owns where
   // he is standing, the other owns what his blade is doing.
@@ -187,6 +198,8 @@ export function createWorld(opts = {}) {
   player.fighter.pos = player.pos;              // one position, shared
   player.xp = 0; player.level = 0;
 
+
+  applyLoadout(inventory, character, player.fighter);
 
   const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 260), [-110, -110, 110, 110]);
   const town = (opts.town === false || opts.lineup) ? [] : buildTown(terrain, seed);
@@ -255,7 +268,7 @@ export function createWorld(opts = {}) {
 
   const world = {
     seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
-    character, flags, quests, chapter: 1, openTrainer: null, log: [],
+    character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
 
     /** Experience goes to the sheet, which hands out levels and learning points. */
     awardXp(amount, reason = 'quest') {
@@ -279,6 +292,62 @@ export function createWorld(opts = {}) {
 
     makeHostile(npc) { if (npc) npc.hostile = true; },
 
+    // --- carrying ------------------------------------------------------------
+    give(id, n = 1) { add(inventory, id, n); world.log.push(`+${n} ${item(id).name}`); },
+    take(id, n = 1) { return remove(inventory, id, n); },
+    carrying: (id, n = 1) => has(inventory, id, n),
+    items: () => listing(inventory),
+
+    equip(id) {
+      const r = equip(inventory, character, id);
+      if (r.ok) { applyLoadout(inventory, character, player.fighter); world.log.push(`equipped ${r.item.name}`); }
+      else world.log.push(r.why);
+      return r;
+    },
+    unequip(slot) {
+      unequip(inventory, slot);
+      applyLoadout(inventory, character, player.fighter);
+      return { ok: true };
+    },
+    drink(id) {
+      const r = drink(inventory, character, player.fighter, id);
+      world.log.push(r.ok ? (r.healed ? `healed ${r.healed}` : 'you feel it settle in') : r.why);
+      return r;
+    },
+
+    // --- trading -------------------------------------------------------------
+    trader(id) {
+      if (!traders.has(id)) traders.set(id, createTrader(id));
+      return traders.get(id);
+    },
+    buy(id, n = 1) {
+      if (!world.openTrader) return { ok: false, why: 'nobody is selling' };
+      const r = buy(world.trader(world.openTrader), inventory, character, id, n);
+      world.log.push(r.ok ? `bought ${item(id).name} for ${r.paid}` : r.why);
+      return r;
+    },
+    sell(id, n = 1) {
+      if (!world.openTrader) return { ok: false, why: 'nobody is buying' };
+      const r = sell(world.trader(world.openTrader), inventory, character, id, n);
+      world.log.push(r.ok ? `sold ${item(id).name} for ${r.got}` : r.why);
+      return r;
+    },
+
+    /** Trader purses and stock, for the save file. */
+    traderState() {
+      return [...traders.entries()].map(([id, t]) => [id, t.gold, [...t.stock.entries()]]);
+    },
+    restoreTraders(state) {
+      traders.clear();
+      for (const [id, gold, stock] of state) {
+        const t = createTrader(id);
+        t.gold = gold;
+        t.stock = new Map(stock);
+        traders.set(id, t);
+      }
+    },
+    reloadout() { applyLoadout(inventory, character, player.fighter); },
+
     /** A save is the seed plus everything that has changed since (§12.1). */
     snapshot() { return snapshot(world); },
     restore(data) { return restore(world, data); },
@@ -294,7 +363,11 @@ export function createWorld(opts = {}) {
       // flag is read here rather than being a note in a conversation.
       if (quests.get('q_ore') === 'told' && flags.has('knows:ore_theft') && crates.length) {
         const d = Math.hypot(player.pos[0] - crates[0].pos[0], player.pos[2] - crates[0].pos[2]);
-        if (d < 3) world.setQuest('q_ore', 'found');
+        if (d < 3) {
+          world.setQuest('q_ore', 'found');
+          world.give('ore_crate');
+          world.give('bandit_letter');
+        }
       }
       if (quests.get('q_wolves') === 'told') {
         const dead = beasts.filter((b) => b.kind === 'wolf' && b.state === S.DEAD).length;
@@ -307,6 +380,7 @@ export function createWorld(opts = {}) {
      * can raise a skill, and it is deliberately separate from the conversation
      * that opened the offer: talking is free, learning costs learning points.
      */
+    /** Learning a skill teaches the character; the world writes the flag too. */
     train(step) {
       const offer = world.openTrainer;
       if (!offer) return { ok: false, why: 'nobody is teaching' };
@@ -320,7 +394,10 @@ export function createWorld(opts = {}) {
       const r = learn(character, skill, room, 'trainer');
       if (r.ok) {
         world.log.push(`${skill} ${r.value != null ? `is now ${r.value}%` : 'learned'} (${r.cost} LP)`);
-        if (skill === 'oneHanded') player.fighter.skill = character.skills.oneHanded;
+        // The world's flag set is what dialogue and loot read, so a skill
+        // learned on the sheet has to appear there too.
+        for (const f of character.flags) flags.add(f);
+        applyLoadout(inventory, character, player.fighter);
       }
       return r;
     },
@@ -389,8 +466,14 @@ export function createWorld(opts = {}) {
           const hit = resolveStrike(f, b, rng, meleeDamage);
           if (hit && b.state === S.DEAD && !b.counted) {
             b.counted = true;
-            player.xp += b.def.xp;
-            player.level = levelForXp(player.xp);
+            world.awardXp(b.def.xp, 'quest');
+            // Trophies. A hide needs skinning; a fang does not, which is why
+            // the free lesson from the hunter is worth walking back for.
+            for (const drop of DROPS[b.kind] || []) {
+              const def = ITEMS[drop.item];
+              if (def.needs && !flags.has(`skill:${def.needs}`)) continue;
+              if (rng() < drop.chance) world.give(drop.item);
+            }
           }
         }
       }

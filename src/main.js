@@ -11,6 +11,7 @@ import { createInput, idleIntent } from './core/input.js';
 import { createWorld } from './world/world.js';
 import { createOverlay, FrameTimer, log } from './core/log.js';
 import { STATE_NAME } from './game/combat.js';
+import { createStorage } from './core/save.js';
 
 const TICK_MS = 1000 / 60;          // the simulation is 60 Hz, always
 const MAX_CATCHUP_MS = 250;         // a backgrounded tab must not simulate four minutes on return
@@ -107,6 +108,38 @@ async function boot() {
   };
   window.GRIMWARD = api;
 
+  // --- saving ---------------------------------------------------------------
+  // F5 saves, F9 loads, and the world autosaves whenever a quest moves. A save
+  // is a few kilobytes because it stores what changed rather than the world.
+  const storage = createStorage(caps);
+  if (storage.inMemory) log('storage unavailable — saves last only for this session');
+  let lastQuestCount = 0;
+
+  async function save(slot = 'auto') {
+    try {
+      const data = world.snapshot();
+      await storage.put(slot, data);
+      log(`saved (${slot}, ${JSON.stringify(data).length} bytes)`);
+      return true;
+    } catch (e) { log(`save failed: ${e.message}`); return false; }
+  }
+
+  async function load(slot = 'auto') {
+    try {
+      const data = await storage.get(slot);
+      if (!data) { log(`no save in ${slot}`); return false; }
+      world.restore(data);
+      rebuildTerrain();
+      log(`loaded ${slot}`);
+      return true;
+    } catch (e) {
+      // A corrupt or foreign save is a message, never a broken game (§12.1).
+      log(`could not load ${slot}: ${e.message}`);
+      return false;
+    }
+  }
+  api.save = save; api.load = load;
+
   // --- conversations ---------------------------------------------------------
   const talkEl = document.getElementById('talk');
   const whoEl = document.getElementById('talk-who');
@@ -144,6 +177,8 @@ async function boot() {
     // if there is nobody there, which is the correct amount of feedback for a
     // key pressed at an empty street.
     if (e.code === 'KeyE') { if (world.talk()) renderTalk(); }
+    if (e.code === 'F5') { e.preventDefault(); save('manual'); }
+    if (e.code === 'F9') { e.preventDefault(); load('manual'); }
   });
 
   const sizeFor = () => {
@@ -224,6 +259,10 @@ async function boot() {
       acc -= TICK_MS;
       ticks++;
     }
+
+    // Autosave when the quest log moves — a region change and a chapter change
+    // will join it once those exist (§5.3).
+    if (world.quests.size !== lastQuestCount) { lastQuestCount = world.quests.size; save('auto'); }
 
     const cell = world.terrainCell();
     if (cell !== terrainCell) { terrainCell = cell; rebuildTerrain(); }

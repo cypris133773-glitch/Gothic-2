@@ -12,6 +12,7 @@ animation and sound is generated in code.
 npm start          # http://localhost:8090 — walk around with WASD
 npm test           # 48 logic checks, no browser, under a second
 npm run shot       # renders four times of day and proves something was drawn
+npm run sim        # plays the game end to end, headless, with no renderer
 npm run play       # drives the real game with real key events through CDP
 npm run perf       # frame-time percentiles on a fixed route
 npm run check      # all three of the above
@@ -52,6 +53,7 @@ What exists, and the command that proves it:
 | Character sheet | Experience, levels, learning points on the five-band curve, weapon percentages, one-way guild oaths, and a rule that nothing can raise a number without naming its source | `npm test` |
 | Conversations | A dialogue graph gated by flags, gold, guild and quest state; trainers who name a price and a ceiling; a parchment panel driven by number keys | `npm run play` |
 | Quests | Told in town, advanced by doing — the stolen ore is found by walking to it, the pack is cleared by killing it | `npm test` |
+| Saving | Deltas against the seed, not snapshots of the world: a played character is about 600 bytes. Versioned with a migration chain, IndexedDB with an in-memory fallback, and a corrupt save is a message rather than a broken game | `npm test`, `npm run play` |
 | Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
 | Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
@@ -122,6 +124,18 @@ which was found by watching the harness rather than by playing:
 
 Before those three, hold-the-button beat space-and-parry at every skill level.
 After them the spacer wins 80–100%.
+
+## The golden path
+
+`npm run sim` plays the game. Not a scripted replay — a bot that steers, fights
+and talks: it walks to the smith, takes the ore job, buys a lesson, walks the
+north road, finds the crates, walks back, gets paid, and uses the smith's word
+to get into the Watch. About twenty seconds a playthrough, and it is the only
+thing that can prove the world is completable, which is why the whole simulation
+was built to run without a renderer.
+
+If the bot cannot get somewhere, that is a finding about the world, not about
+the bot.
 
 ## What the validators check
 

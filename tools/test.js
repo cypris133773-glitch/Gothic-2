@@ -28,6 +28,8 @@ import {
 import { EFFECT_KINDS } from '../src/game/dialogue.js';
 import { DIALOGUE, SPEAKERS } from '../src/data/dialogue.js';
 import { readFileSync } from 'node:fs';
+import { snapshot, restore, migrate, SAVE_VERSION, MIGRATIONS, createStorage } from '../src/core/save.js';
+import { goldenPath } from './sim.mjs';
 
 let passed = 0;
 const failures = [];
@@ -1051,6 +1053,117 @@ check('the guild door needs the whole chain, not just the asking', () => {
   assert(w.dialogue.active.options.some((o) => o.id === 'watch.join'), 'the door never opened');
   w.dialogue.say(w.dialogue.active.options.findIndex((o) => o.id === 'watch.join'));
   eq(w.character.guild, 'watch', 'the oath was not taken');
+});
+
+// --- saving -------------------------------------------------------------------
+
+/** A world with a life lived in it, for the save tests to round-trip. */
+function playedWorld(seed = 5) {
+  const w = createWorld({ seed, beasts: 4, props: 20 });
+  w.awardXp(2600, 'quest');
+  w.flags.add('met:harl');
+  w.setQuest('q_ore', 'told');
+  w.character.gold = 640;
+  w.train !== undefined && w.raise('str', 3);
+  w.beasts[0].state = S.DEAD; w.beasts[0].hp = 0;
+  w.beasts[1].hp = 20;
+  w.player.pos[0] = 42.5; w.player.pos[2] = -13.25; w.player.yaw = 1.1;
+  w.clock.minutes = 17 * 60 + 42; w.clock.day = 3;
+  return w;
+}
+
+check('a save carries everything that changed and nothing that did not', () => {
+  const w = playedWorld();
+  const data = w.snapshot();
+  const bytes = JSON.stringify(data).length;
+  // Deltas, not snapshots: a save that grows with the size of the world is a
+  // save that will be a megabyte by chapter three (§12.1).
+  assert(bytes < 4000, `a save of a young character is ${bytes} bytes`);
+  assert(!JSON.stringify(data).includes('plaster'), 'the save contains world geometry');
+  eq(data.version, SAVE_VERSION, 'version stamped');
+});
+
+check('loading a save puts everything back', () => {
+  const before = playedWorld();
+  const data = before.snapshot();
+  const after = createWorld({ seed: 5, beasts: 4, props: 20 });
+  after.restore(data);
+
+  eq(after.character.xp, before.character.xp, 'experience');
+  eq(after.character.lp, before.character.lp, 'learning points');
+  eq(after.character.gold, before.character.gold, 'gold');
+  eq(after.character.str, before.character.str, 'strength');
+  eq(after.player.pos[0], before.player.pos[0], 'position');
+  eq(after.player.yaw, before.player.yaw, 'facing');
+  eq(after.clock.hhmm, before.clock.hhmm, 'the time of day');
+  eq(after.clock.day, before.clock.day, 'the day');
+  eq(after.quests.get('q_ore'), 'told', 'the quest log');
+  assert(after.flags.has('met:harl'), 'the flags');
+  eq(after.beasts[0].state, S.DEAD, 'a dead beast stays dead');
+  eq(after.beasts[1].hp, 20, 'a wounded beast stays wounded');
+  eq(after.player.fighter.str, after.character.str + 15, 'the fighter agrees with the sheet');
+});
+
+check('a save from an older format is migrated, not refused', () => {
+  const w = playedWorld();
+  const modern = w.snapshot();
+  // Fabricate what version 1 looked like: no quests, no skills.
+  const old = { ...modern, version: 1, quests: undefined, character: { ...modern.character, skills: undefined } };
+  const migrated = migrate(old);
+  eq(migrated.version, SAVE_VERSION, 'brought up to date');
+  assert(Array.isArray(migrated.quests), 'the quest log was filled in');
+  assert(migrated.character.skills.oneHanded > 0, 'the skills were filled in');
+  const w2 = createWorld({ seed: 5, beasts: 4, props: 20 });
+  w2.restore(old);                       // restore migrates on the way in
+  eq(w2.character.gold, modern.character.gold, 'and the old save still loads');
+});
+
+check('a save from the future is refused politely', () => {
+  let msg = '';
+  try { migrate({ version: SAVE_VERSION + 5 }); } catch (e) { msg = e.message; }
+  assert(msg.includes('newer version'), `expected a clear refusal, got "${msg}"`);
+});
+
+check('rubbish is refused without breaking the game', () => {
+  const w = createWorld({ seed: 5, beasts: 2, props: 10 });
+  for (const junk of [null, 42, 'save', {}, { version: 'two' }, []]) {
+    let threw = false;
+    try { w.restore(junk); } catch { threw = true; }
+    assert(threw, `${JSON.stringify(junk)} was accepted as a save file`);
+  }
+  // And the world is still playable afterwards, which is the actual requirement.
+  w.tick(1 / 60, idleIntent());
+  assert(w.player.fighter.hp > 0, 'the world broke on a bad save');
+});
+
+check('a save of the wrong world is refused', () => {
+  const data = playedWorld(5).snapshot();
+  const other = createWorld({ seed: 9, beasts: 2, props: 10 });
+  let msg = '';
+  try { other.restore(data); } catch (e) { msg = e.message; }
+  assert(msg.includes('world'), `expected a refusal about worlds, got "${msg}"`);
+});
+
+check('storage falls back to memory when the browser says no', async () => {
+  const store = createStorage({ storage: false });
+  assert(store.inMemory, 'expected the in-memory fallback');
+  await store.put('slot1', { version: SAVE_VERSION, hello: 'world' });
+  const back = await store.get('slot1');
+  eq(back.hello, 'world', 'the fallback kept the save');
+  eq((await store.list()).length, 1, 'and lists it');
+});
+
+// --- the golden path ----------------------------------------------------------
+
+check('the game can be played from the first line to a guild oath', () => {
+  // The whole of what exists, end to end, by a bot that steers rather than
+  // teleports: talk to the smith, take the ore job, walk the north road, find
+  // the crates, walk back, get paid, and use his word to get into the Watch.
+  const r = goldenPath(1, { maxSeconds: 600 });
+  assert(r.ok, `${r.why} — got as far as: ${r.steps.slice(-3).join(' · ')}`);
+  eq(r.world.character.guild, 'watch', 'the oath was not taken');
+  assert(r.world.character.skills.oneHanded > 10, 'no training was bought');
+  assert(r.world.character.xp >= 650, `only ${r.world.character.xp} experience earned`);
 });
 
 // --- report ------------------------------------------------------------------

@@ -253,6 +253,24 @@ async function main() {
     const closed = await page.evaluate('window.GRIMWARD.probeState()');
     ok('Escape ends the conversation', !closed.talking);
 
+    // --- saving, through the real game -------------------------------------
+    const beforeSave = await page.evaluate('window.GRIMWARD.probeState()');
+    await page.evaluate('window.GRIMWARD.save("test")');
+    await sleep(250);
+    await page.hold('KeyW', 700);            // walk somewhere else
+    await sleep(200);
+    const moved = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the player moved after saving',
+      dist2(beforeSave.pos, moved.pos) > 1.5, `${dist2(beforeSave.pos, moved.pos).toFixed(2)} m`);
+
+    const loaded = await page.evaluate('window.GRIMWARD.load("test")');
+    await sleep(250);
+    const reloaded = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a save can be loaded back', loaded === true);
+    ok('loading puts the player back where they were',
+      dist2(beforeSave.pos, reloaded.pos) < 0.4, `${dist2(beforeSave.pos, reloaded.pos).toFixed(2)} m away`);
+    ok('and keeps what the character knew', reloaded.flags.includes('met:harl'));
+
     // --- the world keeps time ---------------------------------------------
     ok('the clock is running', /^\d\d:\d\d$/.test(landed.clock), landed.clock);
 

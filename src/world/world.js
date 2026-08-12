@@ -21,6 +21,7 @@ import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
 import { DIALOGUE, SPEAKERS } from '../data/dialogue.js';
+import { snapshot, restore } from '../core/save.js';
 
 export const CHUNK = 64;         // metres per terrain chunk
 // Vertices per side by ring: dense underfoot, coarse at the horizon. The last
@@ -265,6 +266,10 @@ export function createWorld(opts = {}) {
     },
 
     makeHostile(npc) { if (npc) npc.hostile = true; },
+
+    /** A save is the seed plus everything that has changed since (§12.1). */
+    snapshot() { return snapshot(world); },
+    restore(data) { return restore(world, data); },
 
     /**
      * The world half of the quest log: things that become true by being done

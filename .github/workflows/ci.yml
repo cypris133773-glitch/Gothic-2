@@ -37,6 +37,11 @@ jobs:
           sudo apt-get update -qq && sudo apt-get install -y -qq chromium-browser || sudo snap install chromium || true
           CHROME=$(command -v chromium || command -v chromium-browser || command -v google-chrome) npm run shot
 
+      # The whole game, played end to end by a bot with no renderer attached.
+      # A soft-lock or an unreachable NPC shows up here and nowhere else.
+      - name: The golden path
+        run: npm run sim -- --seeds=4
+
       # Real key events through the DevTools protocol, against the real page.
       - name: Input and simulation, in a browser
         run: |

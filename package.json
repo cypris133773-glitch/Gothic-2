@@ -12,7 +12,8 @@
     "play": "node tools/play.mjs",
     "perf": "node tools/perf.mjs",
     "perf:baseline": "node tools/perf.mjs --baseline",
-    "check": "npm test && npm run shot && npm run play"
+    "check": "npm test && npm run sim && npm run shot && npm run play",
+    "sim": "node tools/sim.mjs"
   },
   "engines": {
     "node": ">=18"

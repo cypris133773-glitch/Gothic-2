@@ -123,28 +123,75 @@ export function resolveObstacles(p, obstacles) {
   for (let pass = 0; pass < 2; pass++) {
     let moved = false;
     for (const o of obstacles) {
-      if (!o.radius) continue;
       // Ignore anything whose top is under the player's feet or whose base is
       // over their head: a boulder is not a wall to someone standing on it.
       const half = (Array.isArray(o.scale) ? o.scale[1] : o.scale) / 2;
       if (o.pos[1] + half < p.pos[1] + 0.25 || o.pos[1] - half > p.pos[1] + HEIGHT) continue;
-      const dx = p.pos[0] - o.pos[0], dz = p.pos[2] - o.pos[2];
-      const dist = Math.hypot(dx, dz);
-      const min = o.radius + RADIUS;
-      if (dist >= min || dist < 1e-6) continue;
-      const push = (min - dist) / dist;
-      p.pos[0] += dx * push;
-      p.pos[2] += dz * push;
-      // Kill the velocity component going into the obstacle, so a player
-      // walking into a tree stops rather than juddering against it.
-      const nx = dx / dist, nz = dz / dist;
-      const into = p.vel[0] * nx + p.vel[2] * nz;
-      if (into < 0) { p.vel[0] -= nx * into; p.vel[2] -= nz * into; }
-      moved = true;
+      if (o.box ? pushOutOfBox(p, o) : (o.radius ? pushOutOfCircle(p, o) : false)) moved = true;
     }
     if (!moved) break;
   }
   return p;
+}
+
+/** A trunk, a boulder, a barrel, a person: round in plan, and cannot wedge. */
+function pushOutOfCircle(p, o) {
+  const dx = p.pos[0] - o.pos[0], dz = p.pos[2] - o.pos[2];
+  const dist = Math.hypot(dx, dz);
+  const min = o.radius + RADIUS;
+  if (dist >= min || dist < 1e-6) return false;
+  const push = (min - dist) / dist;
+  p.pos[0] += dx * push;
+  p.pos[2] += dz * push;
+  slide(p, dx / dist, dz / dist);
+  return true;
+}
+
+/**
+ * A wall. The player is moved into the box's own frame, clamped to its
+ * rectangle, and pushed back out along whichever face is nearest.
+ *
+ * A house used to be a single keep-out circle, which is the most obvious lie a
+ * world can tell: the corners of the building were solid air, the walls were
+ * passable at the mid-point of each face, and two houses side by side could not
+ * be walked between. The circle was right for the fifty lines it cost at M2 and
+ * wrong for everything after.
+ */
+function pushOutOfBox(p, o) {
+  const cy = Math.cos(-o.yaw), sy = Math.sin(-o.yaw);
+  const rx = p.pos[0] - o.pos[0], rz = p.pos[2] - o.pos[2];
+  // Into the box's frame.
+  const lx = rx * cy + rz * sy;
+  const lz = -rx * sy + rz * cy;
+  const hx = o.box[0] / 2 + RADIUS, hz = o.box[1] / 2 + RADIUS;
+  if (lx < -hx || lx > hx || lz < -hz || lz > hz) return false;
+
+  // Out through the nearest face, which is what stops a character stepping into
+  // a wall and being ejected through the far side of the building.
+  const dxPos = hx - lx, dxNeg = lx + hx;
+  const dzPos = hz - lz, dzNeg = lz + hz;
+  const minX = Math.min(dxPos, dxNeg), minZ = Math.min(dzPos, dzNeg);
+  let nlx = 0, nlz = 0;
+  if (minX < minZ) nlx = dxPos < dxNeg ? 1 : -1;
+  else nlz = dzPos < dzNeg ? 1 : -1;
+  const depth = Math.min(minX, minZ);
+
+  // Back into world space.
+  const wx = nlx * cy - nlz * sy;
+  const wz = nlx * sy + nlz * cy;
+  p.pos[0] += wx * depth;
+  p.pos[2] += wz * depth;
+  slide(p, wx, wz);
+  return true;
+}
+
+/**
+ * Remove the component of velocity going into a surface, so a character walking
+ * at a wall stops against it and a character walking along one keeps going.
+ */
+function slide(p, nx, nz) {
+  const into = p.vel[0] * nx + p.vel[2] * nz;
+  if (into < 0) { p.vel[0] -= nx * into; p.vel[2] -= nz * into; }
 }
 
 const _n = new Float32Array(3);

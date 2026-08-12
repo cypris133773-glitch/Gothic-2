@@ -418,6 +418,64 @@ check('a tree is solid', () => {
   assert(w.player.pos[2] < tree.pos[2], 'the character walked through the tree');
 });
 
+// --- walls --------------------------------------------------------------------
+
+check('a wall is solid along its whole face, not just at the middle', () => {
+  const w = createWorld({ seed: 5, props: 0, people: false });
+  const house = w.obstacles.find((o) => o.box);
+  assert(house, 'the town has no walls at all');
+  const [bw, bd] = house.box;
+  const cy = Math.cos(house.yaw), sy = Math.sin(house.yaw);
+  // Walk at the wall from several points along it, including near the corners,
+  // which is exactly where a keep-out circle used to let a character through.
+  for (const t of [-0.42, -0.2, 0, 0.2, 0.42]) {
+    const lx = t * bw, lz = -(bd / 2 + 4);
+    const startX = house.pos[0] + lx * cy + lz * sy;
+    const startZ = house.pos[2] - lx * sy + lz * cy;
+    const world = createWorld({ seed: 5, props: 0, people: false, start: [startX, startZ] });
+    // Face the wall, then run at it for three seconds.
+    world.player.yaw = Math.atan2(house.pos[0] - startX, house.pos[2] - startZ);
+    for (let i = 0; i < 180; i++) world.tick(1 / 60, { ...idleIntent(), forward: 1, run: true });
+    const p = world.player.pos;
+    const dx = p[0] - house.pos[0], dz = p[2] - house.pos[2];
+    const px = dx * cy - dz * sy, pz = dx * sy + dz * cy;
+    const inside = Math.abs(px) < bw / 2 - 0.05 && Math.abs(pz) < bd / 2 - 0.05;
+    assert(!inside, `the character walked into the house at t=${t} (local ${px.toFixed(2)}, ${pz.toFixed(2)})`);
+  }
+});
+
+check('a corner is solid too', () => {
+  const w = createWorld({ seed: 5, props: 0, people: false });
+  const house = w.obstacles.find((o) => o.box);
+  const diag = Math.hypot(house.box[0], house.box[1]) / 2 + 3;
+  const startX = house.pos[0] + diag * 0.71, startZ = house.pos[2] + diag * 0.71;
+  const world = createWorld({ seed: 5, props: 0, people: false, start: [startX, startZ] });
+  world.player.yaw = Math.atan2(house.pos[0] - startX, house.pos[2] - startZ);
+  for (let i = 0; i < 240; i++) world.tick(1 / 60, { ...idleIntent(), forward: 1, run: true });
+  const dx = world.player.pos[0] - house.pos[0], dz = world.player.pos[2] - house.pos[2];
+  const cy = Math.cos(house.yaw), sy = Math.sin(house.yaw);
+  const px = dx * cy - dz * sy, pz = dx * sy + dz * cy;
+  assert(Math.abs(px) > house.box[0] / 2 - 0.05 || Math.abs(pz) > house.box[1] / 2 - 0.05,
+    `the character cut the corner into the house (local ${px.toFixed(2)}, ${pz.toFixed(2)})`);
+});
+
+check('a character can walk down the gap between two houses', () => {
+  // The circle version could not: two round keep-outs overlap where the
+  // buildings do not, and the street between them was sealed.
+  const w = createWorld({ seed: 5, props: 0, people: false });
+  const walls = w.obstacles.filter((o) => o.box);
+  assert(walls.length >= 2, 'not enough houses to have a street');
+  let widest = 0;
+  for (let i = 0; i < walls.length; i++) {
+    for (let j = i + 1; j < walls.length; j++) {
+      const d = Math.hypot(walls[i].pos[0] - walls[j].pos[0], walls[i].pos[2] - walls[j].pos[2]);
+      const need = (Math.max(...walls[i].box) + Math.max(...walls[j].box)) / 2;
+      widest = Math.max(widest, d - need);
+    }
+  }
+  assert(widest > 1.2, `the widest gap between two houses is ${widest.toFixed(2)} m`);
+});
+
 check('the camera stays out of the ground and behind the player', () => {
   const w = createWorld({ seed: 5, props: 120 });
   const rng = makeRng(3);

@@ -157,7 +157,7 @@ export function createWorld(opts = {}) {
     : opts.people === false ? [] : makePeople(terrain, seed);
 
   // Everything the character controller can bump into.
-  const obstacles = [...props, ...town].filter((b) => b.radius);
+  const obstacles = [...props, ...town].filter((b) => b.radius || b.box);
 
   // Scene buffers, reused every frame: the scene is a *view* of the simulation
   // and rebuilding it must not allocate (§8.1.4). The static half never changes;

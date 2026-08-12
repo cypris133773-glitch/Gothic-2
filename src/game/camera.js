@@ -77,11 +77,16 @@ function blocked(x, y, z, terrain, obstacles) {
   if (terrain && y < terrain.heightAt(x, z) + 0.3) return true;
   if (obstacles) {
     for (const o of obstacles) {
-      if (!o.radius) continue;
       const half = (Array.isArray(o.scale) ? o.scale[1] : o.scale) / 2;
       if (y < o.pos[1] - half || y > o.pos[1] + half) continue;
       const dx = x - o.pos[0], dz = z - o.pos[2];
-      if (dx * dx + dz * dz < (o.radius + 0.3) ** 2) return true;
+      if (o.box) {
+        // Same rectangle the character collides against, so the camera cannot
+        // sit inside a wall the player is standing beside.
+        const cy = Math.cos(-o.yaw), sy = Math.sin(-o.yaw);
+        const lx = dx * cy + dz * sy, lz = -dx * sy + dz * cy;
+        if (Math.abs(lx) < o.box[0] / 2 + 0.3 && Math.abs(lz) < o.box[1] / 2 + 0.3) return true;
+      } else if (o.radius && dx * dx + dz * dz < (o.radius + 0.3) ** 2) return true;
     }
   }
   return false;

@@ -38,7 +38,7 @@ What exists, and the command that proves it:
 | Renderer | WebGL2 behind a device interface, ACES tonemapping, hemisphere ambient, sun and moon key light, aerial-perspective fog, shader compilation that cannot fail silently | `npm run shot` |
 | Terrain | Seeded heightfield with authored control curves — a settlement pad and a wandering road that bend the noise rather than sit on it — slope- and altitude-blended colour, rule-based scatter | `npm test`, `npm run shot` |
 | Streaming | 576 m of ground around the player in 64 m chunks, four levels of detail by ring, skirts over the seams, deep water never built, rebuilt only when the player crosses a chunk boundary | `npm test`, `npm run shot -- --vista` |
-| Traversal | Capsule character with mass, acceleration, friction, gravity, jump, sneak, slope sliding, circle-versus-circle obstacle resolution | `npm run play` |
+| Traversal | Capsule character with mass, acceleration, friction, gravity, jump, sneak, slope sliding, and collision against both round obstacles and oriented wall rectangles | `npm run play`, `npm test` |
 | Camera | Spring arm that pulls in instantly and eases out, never enters terrain or a tree, leads the character when they move | `npm test`, `npm run play` |
 | Loop | Fixed 60 Hz simulation, rendering decoupled, catch-up clamped and capped, `?off=` switches, `F3` overlay with frame percentiles | `npm run perf` |
 | World clock | Two-hour day, twilight, moonlight, sleep-until-hour | `npm test` |
@@ -57,9 +57,8 @@ Two preview framings exist alongside the four times of day:
 framing that shows whether the distance holds up.
 
 Next is **M3** (the worldgen tool, the in-browser placement editor, baked nav
-data), then the rest of **M4/M5**: real interiors and wall collision — a house
-is still one keep-out circle, which is the most obvious remaining lie in the
-world. The milestone table is §14 of the brief.
+data), then the rest of **M4/M5**: interiors you can walk into, and a
+skinned mesh for the characters. The milestone table is §14 of the brief.
 
 Two things are tied to the quality tier: shadows and material detail. Both are
 nearly free on a GPU and both are expensive on a software rasteriser — one

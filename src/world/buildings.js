@@ -158,14 +158,14 @@ export function buildHouse(spec) {
   }
 
   // --- collision -------------------------------------------------------------
-  // One circle around the footprint. A house is not a circle, but at M2 the
-  // character controller only knows circles, and a slightly generous keep-out
-  // around a building is much better than walking through its front wall. Real
-  // wall collision arrives with the interiors at M3.
+  // The footprint, as an oriented rectangle rather than the circle this used to
+  // be. A circle around a house makes its corners solid air, its walls passable
+  // at the middle of each face, and the gap between two neighbours impassable.
+  const jetty = storeys > 1 ? 0.64 : 0;
   out.push({
-    pos: [spec.x, y0 + 1.5, spec.z], yaw, pitch: 0,
-    scale: [0.01, 3, 0.01], albedo: [0, 0, 0],
-    radius: Math.max(w, d) * 0.52, invisible: true,
+    pos: [spec.x, y0 + (eaves / 2), spec.z], yaw, pitch: 0,
+    scale: [0.01, eaves, 0.01], albedo: [0, 0, 0],
+    box: [w + jetty, d + jetty], invisible: true,
   });
 
   return out;

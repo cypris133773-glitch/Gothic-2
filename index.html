@@ -20,6 +20,14 @@
 
 <div id="overlay"></div>
 
+<!-- The one loading screen in the game, and it is at the one place where there
+     is genuinely another world to load: the pass. Everything on the island
+     streams, so this never appears while walking. -->
+<div id="loading" hidden>
+  <h2 id="loading-where"></h2>
+  <p id="loading-note"></p>
+</div>
+
 <!-- Conversations are text, and text is what the DOM is for. The canvas draws
      the world; a talking-head panel over it is one element and reflows itself
      on a phone, which a canvas-drawn one would not. -->

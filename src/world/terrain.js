@@ -13,10 +13,18 @@
 
 import { makeRng, hash } from '../core/rng.js';
 import { MAT } from '../assets/texgen.js';
+import { REGIONS, DEFAULT_REGION, region as regionOf, VERATH_GATE_APRON, VERATH_HARBOUR_APRON } from './regions.js';
 
-export const TERRAIN_SIZE = 512;      // metres across, centred on the origin
 export const SEA_LEVEL = 0;           // y = 0 is the waterline, everywhere
-const HALF = TERRAIN_SIZE / 2;
+
+// The island's numbers, re-exported so the code that only ever knew about one
+// region keeps working. `createTerrain(seed, 'cleftvale')` is how you get the
+// other one; everything below is written against whichever region it was given.
+export const TERRAIN_SIZE = REGIONS[DEFAULT_REGION].size;
+export const PLACES = REGIONS[DEFAULT_REGION].places;
+export const ROADS = REGIONS[DEFAULT_REGION].roads;
+export const GATE_APRON = VERATH_GATE_APRON;
+export const HARBOUR_APRON = VERATH_HARBOUR_APRON;
 
 /** Value noise with a hashed lattice — deterministic, seedless at call time. */
 function noise2(seed, x, z) {
@@ -44,68 +52,6 @@ function fbm(seed, x, z, octaves = 5) {
 }
 
 /**
- * The places on the island, and the roads between them (docs/WORLD.md).
- *
- * These are *control curves*, not decoration: the height function flattens the
- * ground under a pad and carves a shelf under a road, so a road is the flat
- * ground rather than a stripe painted on a hillside. Walking off one is a
- * decision you feel in the slope under your feet, which is the whole of how
- * this game states difficulty (pillar P2).
- */
-export const PLACES = {
-  halden:     { at: [0, 0],      r: 46, w: 34, level: 1.2, kind: 'city' },
-  farm_aldwin:{ at: [-58, 74],   r: 15, level: 3.0, kind: 'farm' },
-  farm_bren:  { at: [26, 96],    r: 14, level: 4.5, kind: 'farm' },
-  farm_sekk:  { at: [96, 52],    r: 14, level: 6.0, kind: 'farm' },
-  farm_marrow:{ at: [-104, 22],  r: 14, level: 5.0, kind: 'farm' },
-  farm_hulder:{ at: [64, -84],   r: 14, level: 7.0, kind: 'farm' },
-  chapter:    { at: [-18, -118], r: 34, level: 12.0, kind: 'temple' },
-  tower:      { at: [122, -104], r: 22, level: 15.0, kind: 'tower' },
-  lighthouse: { at: [-142, -34], r: 13, level: 9.0, kind: 'light' },
-  cleft:      { at: [168, 46],   r: 22, level: 12.0, kind: 'pass' },
-};
-
-/**
- * Roads, as polylines. Width in metres; the shoulder falls away either side.
- *
- * Every inland road leaves through one gate and every coastal road through the
- * other. That is not tidiness — it is the whole reason the wall is worth
- * building: if there were four ways out of the city, being refused at one of
- * them would mean nothing.
- */
-export const GATE_APRON = [0, 44];       // outside the land gate, where the roads fork
-export const HARBOUR_APRON = [-40, -4];  // outside the harbour gate
-
-// `levels` is the height of the road at each point, in metres, and two things
-// about it are load-bearing, both found by the walkability test rather than by
-// looking at it.
-//
-// It is **written down, not inferred.** The first version worked out each
-// vertex's height from whichever place happened to be nearest — fine at the two
-// ends of a road and nonsense in the middle, where the tower road's mid-point
-// was nearest a farm at seven metres, so the lane dropped nineteen metres and
-// climbed back out at one in two.
-//
-// A road that ends at a place carries **a vertex on that place's rim, already
-// at the place's height**, and runs flat from there to the middle. Without it
-// the lane and the pad disagree about the same square metre for the last thirty
-// metres, the blend hands over between them within a couple of steps, and the
-// approach to the monastery has a hump the height of the disagreement.
-export const ROADS = [
-  { name: 'gate apron',  width: 6.0, points: [[0, 34], GATE_APRON],                          levels: [1.2, 1.6] },
-  { name: 'farm road',   width: 5.0, points: [GATE_APRON, [-20, 58], [-58, 74]],             levels: [1.6, 2.2, 3.0] },
-  { name: 'south fork',  width: 4.2, points: [[-20, 58], [26, 96]],                          levels: [2.2, 4.5] },
-  { name: 'east road',   width: 5.0, points: [GATE_APRON, [54, 30], [78, 14], [96, 52]],     levels: [1.6, 3.5, 5.0, 6.0] },
-  { name: 'cleft road',  width: 4.6, points: [[96, 52], [140, 50], [168, 46]],               levels: [6.0, 9.0, 12.0] },
-  { name: 'tower road',  width: 4.0, points: [[78, 14], [110, -46], [117.5, -82], [122, -104]], levels: [5.0, 10.0, 15.0, 15.0] },
-  { name: 'north lane',  width: 4.0, points: [[78, 14], [64, -84]],                          levels: [5.0, 7.0] },
-  { name: 'harbour way', width: 5.4, points: [[-26, 0], HARBOUR_APRON],                      levels: [1.2, 1.5] },
-  { name: 'temple road', width: 4.6, points: [HARBOUR_APRON, [-36, -62], [-28, -86], [-18, -118]], levels: [1.5, 8.0, 12.0, 12.0] },
-  { name: 'coast road',  width: 4.4, points: [HARBOUR_APRON, [-88, -20], [-142, -34]],       levels: [1.5, 5.0, 9.0] },
-  { name: 'west lane',   width: 4.0, points: [HARBOUR_APRON, [-104, 22]],                    levels: [1.5, 5.0] },
-];
-
-/**
  * How wide the shoulder has to be to make up a cut of `drop` metres.
  *
  * One in three is roughly the angle loose earth stands at. The cap is a
@@ -126,11 +72,6 @@ function batter(drop) {
   return Math.min(Math.abs(drop) * 3.0, 45);
 }
 
-/** The places, with their ellipse radii worked out once. */
-const PLACE_LIST = Object.values(PLACES).map((p) => ({
-  ...p, rx: p.w || p.r, rz: p.r, rmin: Math.min(p.w || p.r, p.r),
-}));
-
 /** Distance from a point to a segment, and the fraction along it. */
 function distToSegment(px, pz, ax, az, bx, bz) {
   const dx = bx - ax, dz = bz - az;
@@ -140,8 +81,13 @@ function distToSegment(px, pz, ax, az, bx, bz) {
   return { d: Math.hypot(px - (ax + dx * t), pz - (az + dz * t)), t };
 }
 
-export function createTerrain(seed = 1) {
-  const s = hash(`terrain:${seed}`) & 0xffff;
+export function createTerrain(seed = 1, regionName = DEFAULT_REGION) {
+  const R = regionOf(regionName);
+  const s = hash(`terrain:${seed}:${R.name}`) & 0xffff;
+  const HALF = R.size / 2;
+  const PLACE_LIST = Object.values(R.places).map((p) => ({
+    ...p, rx: p.w || p.r, rz: p.r, rmin: Math.min(p.w || p.r, p.r),
+  }));
 
   /**
    * Road segments, flattened and with their endpoint heights resolved once.
@@ -154,7 +100,7 @@ export function createTerrain(seed = 1) {
    * resolving them here costs a hundred microseconds once.
    */
   const SEGMENTS = [];
-  for (const road of ROADS) {
+  for (const road of R.roads) {
     for (let i = 0; i < road.points.length - 1; i++) {
       const [ax, az] = road.points[i], [bx, bz] = road.points[i + 1];
       SEGMENTS.push({
@@ -238,25 +184,27 @@ export function createTerrain(seed = 1) {
   /** The height of whatever place is nearest a road's endpoint. */
   function nearestPlaceLevel(x, z) {
     let best = null, bestD = Infinity;
-    for (const p of Object.values(PLACES)) {
+    for (const p of PLACE_LIST) {
       const d = Math.hypot(x - p.at[0], z - p.at[1]);
       if (d < bestD) { bestD = d; best = p; }
     }
     return best ? best.level : 2;
   }
 
-  /** The island as the noise made it, before anybody built a road on it. */
+  /** The ground as the noise made it, before anybody built a road on it. */
   function baseHeight(x, z) {
     // Large-scale relief, then a medium band for hillocks, then fine detail.
-    const relief = fbm(s, x * 0.0045, z * 0.0045, 4) * 34;
-    const hills = fbm(s + 31, x * 0.021, z * 0.021, 3) * 5.5;
-    const detail = fbm(s + 57, x * 0.13, z * 0.13, 2) * 0.55;
-    const h = relief + hills + detail - 14;
+    const relief = fbm(s, x * 0.0045, z * 0.0045, 4) * R.relief;
+    const hills = fbm(s + 31, x * 0.021, z * 0.021, 3) * R.hills;
+    const detail = fbm(s + 57, x * 0.13, z * 0.13, 2) * R.detail;
+    const h = relief + hills + detail + R.floor;
 
-    // The island falls away to the sea at the edge of the playable area, so a
-    // player who walks to the boundary meets a coast rather than a wall.
+    // At the edge of the playable area the ground leaves rather than stopping:
+    // on the island it falls away to a coast, in the valley it *rises* into the
+    // ridges that make it a valley. A negative `edge` is the second case, and
+    // it is why the boundary is never a wall you can see the end of.
     const edge = Math.max(Math.abs(x), Math.abs(z)) / HALF;
-    return h - smooth01((edge - 0.72) / 0.28) * 26;
+    return h - smooth01((edge - R.edgeStart) / (1 - R.edgeStart)) * R.edge;
   }
 
   function heightAt(x, z) {
@@ -286,7 +234,12 @@ export function createTerrain(seed = 1) {
   /** How built-up this point is: 1 in a square, 0 in a wood. */
   const padFactor = (x, z) => control(x, z, baseHeight(x, z)).weight;
 
-  return { seed, heightAt, normalAt, slopeAt, padFactor, places: PLACES, roads: ROADS, size: TERRAIN_SIZE };
+  return {
+    seed, heightAt, normalAt, slopeAt, padFactor,
+    region: R.name, title: R.title, water: R.water,
+    ground: R.ground, flora: R.flora,
+    places: R.places, roads: R.roads, size: R.size, arrive: R.arrive, exits: R.exits || [],
+  };
 }
 
 /**
@@ -319,11 +272,15 @@ export function buildChunk(terrain, cx, cz, chunkSize, res) {
     verts[v++] = nrm[0]; verts[v++] = forceDown ? nrm[1] : nrm[1]; verts[v++] = nrm[2];
     const slope = Math.acos(Math.min(1, nrm[1]));
     const rock = smooth01((slope - 0.55) / 0.35);
-    const shore = 1 - smooth01((y - SEA_LEVEL) / 1.1);
-    const gr = [0.13, 0.18, 0.08], rk = [0.22, 0.21, 0.19], sh = [0.30, 0.28, 0.22];
+    // A shoreline is only a shoreline where there is a sea. In the valley the
+    // low ground is a valley floor, and bleaching it into sand was the clearest
+    // sign that both regions were being painted by one hardcoded palette.
+    const shore = terrain.water ? 1 - smooth01((y - SEA_LEVEL) / 1.1) : 0;
+    const G = terrain.ground;
+    const gr = G.grass, rk = G.rock, sh = G.shore;
     const paved = smooth01((terrain.padFactor(x, z) - 0.45) / 0.35);
     const grain = 0.86 + fbm(1, x * 2.7, z * 2.7, 2) * 0.34;
-    const cob = [0.17 * grain, 0.163 * grain, 0.152 * grain];
+    const cob = [G.paved[0] * grain, G.paved[1] * grain, G.paved[2] * grain];
     for (let c = 0; c < 3; c++) {
       const base = gr[c] * (1 - rock) + rk[c] * rock;
       const land = base * (1 - shore) + sh[c] * shore;
@@ -399,15 +356,16 @@ export function scatter(terrain, count, bounds) {
     const slope = terrain.slopeAt(x, z);
     if (y < 0.8 || slope > 0.6) continue;              // no props in the sea or on cliffs
     if (terrain.padFactor(x, z) > 0.3) continue;       // and none in the town
-    const tree = rng.chance(0.62) && slope < 0.35;
-    const h = tree ? rng.range(4.5, 9.5) : rng.range(0.5, 1.9);
+    const F = terrain.flora;
+    const tree = rng.chance(F.treeChance) && slope < 0.35;
+    const h = tree ? rng.range(F.height[0], F.height[1]) : rng.range(0.5, 1.9);
     const w = tree ? rng.range(0.35, 0.6) : h * rng.range(0.7, 1.3);
     const yaw = rng.range(0, Math.PI * 2);
     out.push({
       pos: [x, y + h / 2, z],
       yaw, pitch: 0,
       scale: [w, h, w],
-      albedo: tree ? [0.10, 0.07, 0.05] : [0.21, 0.20, 0.19],
+      albedo: tree ? F.trunk : terrain.ground.rock,
       tex: tree ? MAT.BARK : MAT.ROCK,
       radius: w * 0.7,
       spin: 0,
@@ -415,13 +373,20 @@ export function scatter(terrain, count, bounds) {
     if (tree) {
       // A canopy, because a trunk on its own reads as a telegraph pole. It
       // carries no collision radius: you walk under a tree, not into it.
-      const cw = rng.range(2.6, 4.4);
+      //
+      // A dead tree gets a small, thin, grey one instead of none at all: a bare
+      // pole reads as scaffolding, and a stripped crown reads as a dead tree.
+      const cw = F.dead ? rng.range(1.1, 2.0) : rng.range(2.6, 4.4);
       out.push({
-        pos: [x, y + h * 0.86, z],
+        pos: [x, y + h * (F.dead ? 0.92 : 0.86), z],
         yaw: yaw * 0.6, pitch: 0,
-        scale: [cw, rng.range(2.4, 3.6), cw],
-        albedo: [0.09 + rng.range(0, 0.03), 0.145 + rng.range(0, 0.045), 0.06],
-        tex: MAT.FOLIAGE,
+        scale: [cw, F.dead ? rng.range(0.9, 1.6) : rng.range(2.4, 3.6), cw],
+        albedo: [
+          F.canopy[0] + rng.range(0, F.canopySpread[0]),
+          F.canopy[1] + rng.range(0, F.canopySpread[1]),
+          F.canopy[2] + rng.range(0, F.canopySpread[2]),
+        ],
+        tex: F.dead ? MAT.BARK : MAT.FOLIAGE,
         spin: 0,
       });
     }
@@ -464,9 +429,13 @@ export function clutter(terrain, around, radius = 30, count = 2600) {
       yaw: rng.range(0, Math.PI * 2), pitch: stone ? 0 : rng.range(-0.16, 0.16),
       scale: [w, h, w * rng.range(0.18, 0.42)],
       albedo: stone
-        ? [0.20, 0.19, 0.18]
-        : [0.15 + rng.range(0, 0.05), 0.24 + rng.range(0, 0.09), 0.08 + rng.range(0, 0.04)],
-      tex: stone ? MAT.ROCK : MAT.FOLIAGE,
+        ? terrain.ground.rock
+        : [
+          terrain.flora.tuft[0] + rng.range(0, 0.05),
+          terrain.flora.tuft[1] + rng.range(0, 0.09),
+          terrain.flora.tuft[2] + rng.range(0, 0.04),
+        ],
+      tex: stone ? MAT.ROCK : (terrain.flora.dead ? MAT.DIRT : MAT.FOLIAGE),
       // Marked so the renderer sways it. Stones do not sway.
       sway: stone ? 0 : 1,
     });

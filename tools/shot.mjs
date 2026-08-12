@@ -112,6 +112,11 @@ const SCENES = LINEUP
   ? [
       { name: 'vista', time: 11.0, extra: '&start=0,96&yaw=3.1416' },
       { name: 'gate', time: 10.5, extra: '&start=0,56&yaw=3.1416' },
+      // The other world. Three framings, because the valley is half the game
+      // and had none until it was built.
+      { name: 'valley', time: 11.0, extra: '&region=cleftvale&start=-4,108&yaw=3.1416' },
+      { name: 'camp', time: 9.0, extra: '&region=cleftvale&start=-16,88&yaw=3.1416' },
+      { name: 'pit', time: 13.0, extra: '&region=cleftvale&start=-92,36&yaw=3.1416' },
     ]
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]

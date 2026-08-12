@@ -122,6 +122,38 @@ broken (`the roads are walkable end to end`, `tools/test.js`):
 
 Nothing on the island exceeds twenty degrees on a road, on any seed.
 
+## The other side of the pass
+
+Verath is one seamless surface: you can walk from the harbour gate to the mouth
+of the Cleft without a pause, and that is the point — the difficulty curve is
+stated in geography, and geography you have to wait for is geography you stop
+believing in.
+
+**The Cleft valley is a different world.** Its own heightfield, its own
+buildings, its own inhabitants, and the only loading screen in the game. That
+is a design decision rather than a concession: the pass is the one place the
+player is meant to feel they have left everything behind, and the game this one
+is in the tradition of made the same call at the same place.
+
+| In the valley | What it is |
+| --- | --- |
+| **The camp** | A palisade, a longhouse and four tents. The only safe ground. |
+| **Three ore pits** | Terraced holes with headframes and spoil heaps. The economy. |
+| **The keep** | Whoever is taking the ore is behind that wall. |
+| **The shrine** | Nine standing stones and a cold fire. Somebody still comes here. |
+
+It looks different because it *is* different: each region carries its own
+ground palette and its own flora, so the valley is bare rock and dead trunks
+where the island is grass and canopies. Everything past the pass also hits
+about twice as hard and takes about twice as much — the chapter-three wall
+stated as arithmetic rather than as a locked door. You can walk in at level two
+and you will not walk out.
+
+Crossing carries the man and leaves the world: his purse, his oath, his level,
+what he is carrying, what he knows, what he has been asked to do, the day and
+the hour. Creatures are deliberately not on that list — the valley repopulates,
+and the island you come back to has moved on.
+
 ## Chapters
 
 Four, and each one rewrites the map rather than adding to a list.

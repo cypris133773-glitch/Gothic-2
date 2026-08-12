@@ -14,7 +14,8 @@ import { makeRng, hash } from '../src/core/rng.js';
 import * as m from '../src/core/math.js';
 import { on, emit, off, listenerCount, clearAll } from '../src/core/events.js';
 import { createTerrain, PLACES, ROADS } from '../src/world/terrain.js';
-import { createWorld, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
+import { createWorld, travel, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
+import { REGIONS } from '../src/world/regions.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED, resolveObstacles } from '../src/game/player.js';
 import { KITS, poseHumanoid, kitForArmour } from '../src/game/rig.js';
@@ -866,6 +867,132 @@ check('nothing is placed on the market square', () => {
     const d = Math.hypot(b.pos[0], b.pos[2]);
     assert(d > 25, `a ${b.kind} spawned ${d.toFixed(1)} m from the well`);
   }
+});
+
+// --- the two worlds -----------------------------------------------------------
+
+check('both regions build, and both are places you could stand in', () => {
+  for (const name of Object.keys(REGIONS)) {
+    for (const seed of [1, 4, 7]) {
+      const t = createTerrain(seed, name);
+      eq(t.region, name, 'the terrain knows which region it is');
+      for (const [place, p] of Object.entries(t.places)) {
+        near(t.heightAt(p.at[0], p.at[1]), p.level, 0.6, `${name}/${place} sits at its level`);
+        assert(t.slopeAt(p.at[0], p.at[1]) < 0.2, `${name}/${place} is on a slope`);
+      }
+    }
+  }
+});
+
+check('every road in every region is walkable end to end', () => {
+  for (const name of Object.keys(REGIONS)) {
+    for (const seed of [1, 3, 5]) {
+      const t = createTerrain(seed, name);
+      for (const road of t.roads) {
+        for (let i = 0; i < road.points.length - 1; i++) {
+          const [ax, az] = road.points[i], [bx, bz] = road.points[i + 1];
+          const steps = Math.ceil(Math.hypot(bx - ax, bz - az));
+          for (let k = 0; k <= steps; k++) {
+            const u2 = k / steps;
+            const x = ax + (bx - ax) * u2, z = az + (bz - az) * u2;
+            assert(t.slopeAt(x, z) < 0.40,
+              `${name}: ${road.name} slopes ${t.slopeAt(x, z).toFixed(2)} rad at ${x.toFixed(0)},${z.toFixed(0)}`);
+          }
+        }
+      }
+    }
+  }
+});
+
+check('the pass is a door, not a wall, and it goes both ways', () => {
+  const w = createWorld({ seed: 2, props: 20 });
+  eq(w.region, 'verath', 'a new game starts on the island');
+
+  // Standing at the barricade does nothing until somebody has told you the
+  // road east is worth walking. It is unknown, not locked.
+  const cleft = w.places.cleft.at;
+  w.player.pos[0] = cleft[0]; w.player.pos[2] = cleft[1];
+  w.tick(1 / 60);
+  assert(!w.pendingTravel, 'the pass took a man nobody had sent');
+
+  w.flags.add('quest:q_cleft:told');
+  w.tick(1 / 60);
+  eq(w.pendingTravel, 'cleftvale', 'the pass did not open to a man who had been sent');
+
+  const there = travel(w, 'cleftvale');
+  assert(there.ok, `travel refused: ${there.why}`);
+  eq(there.world.region, 'cleftvale', 'we did not arrive');
+  assert(there.world.town.length > 200, 'the valley was built empty');
+
+  // And back out again, from the other end of the same pass — after walking to
+  // it. You do not arrive standing in the way out, which is the whole of the
+  // travel lock: the first version put the player down on top of the return
+  // exit and the browser harness watched him cross and come straight back.
+  there.world.tick(1 / 60);
+  assert(!there.world.pendingTravel, 'arriving in the valley sent us straight home again');
+  const mouth = there.world.places.gate.at;
+  there.world.player.pos[0] = mouth[0]; there.world.player.pos[2] = mouth[1];
+  there.world.tick(1 / 60);
+  eq(there.world.pendingTravel, 'verath', 'there is no way home');
+  const back = travel(there.world, 'verath');
+  assert(back.ok, `going home refused: ${back.why}`);
+  eq(back.world.region, 'verath', 'we did not get home');
+});
+
+check('crossing the pass carries the man and leaves the world behind', () => {
+  const w = createWorld({ seed: 2, props: 20, beasts: 6 });
+  w.character.gold = 1234;
+  w.character.guild = 'watch';
+  w.awardXp(3000, 'quest');
+  w.give('healing_draught', 3);
+  w.setQuest('q_ore', 'found');
+  w.flags.add('pass:upper');
+  w.clock.day = 4; w.clock.minutes = 17 * 60;
+  w.player.fighter.hp = 63;
+  w.tick(1 / 60);
+
+  const r = travel(w, 'cleftvale');
+  assert(r.ok, r.why);
+  const n = r.world;
+  eq(n.character.gold, 1234, 'his purse');
+  eq(n.character.guild, 'watch', 'his oath');
+  eq(n.character.level, w.character.level, 'his level');
+  assert(n.carrying('healing_draught', 3), 'what he was carrying');
+  eq(n.quests.get('q_ore'), 'found', 'what he had been asked to do');
+  eq(n.clock.day, 4, 'the day');
+  near(n.clock.minutes, 17 * 60, 0.02, 'the hour');   // one tick of drift from the tick that triggered it
+  eq(n.player.fighter.hp, 63, 'his wounds');
+  eq(n.chapter, w.chapter, 'the chapter');
+  assert(n.flags.has('pass:upper'), 'what he had earned');
+
+  // And the world is genuinely a different one.
+  assert(n.people.length === 0, 'the valley is populated by townspeople');
+  assert(n.terrain.size !== w.terrain.size, 'both regions are the same size');
+  assert(n.beasts.every((b) => b.valley), 'the valley kept the island\'s creatures');
+  const islandWolf = w.beasts.find((b) => b.kind === 'wolf');
+  const valleyWolf = n.beasts.find((b) => b.kind === 'wolf');
+  if (islandWolf && valleyWolf) {
+    assert(valleyWolf.maxHp > islandWolf.maxHp * 1.5,
+      `a valley wolf has ${valleyWolf.maxHp} hp against the island's ${islandWolf.maxHp}`);
+  }
+});
+
+check('a save knows which world it is in, and refuses the wrong one', () => {
+  const w = createWorld({ seed: 6, props: 10, beasts: 2 });
+  const r = travel(w, 'cleftvale');
+  const data = r.world.snapshot();
+  eq(data.region, 'cleftvale', 'the save does not say where it is');
+
+  // Into a matching world: fine.
+  const good = createWorld({ seed: 6, region: 'cleftvale', props: 10, beasts: 2 });
+  good.restore(data);
+  eq(good.region, 'cleftvale', 'a matching world would not take it');
+
+  // Into the island: refused, with a message rather than a physics bug.
+  const bad = createWorld({ seed: 6, props: 10, beasts: 2 });
+  let msg = '';
+  try { bad.restore(data); } catch (e) { msg = e.message; }
+  assert(/cleftvale/.test(msg), `expected a refusal naming the region, got "${msg}"`);
 });
 
 // --- the wardrobe -------------------------------------------------------------

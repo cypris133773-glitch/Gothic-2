@@ -121,8 +121,12 @@ async function main() {
 
     // --- boot -------------------------------------------------------------
     const t0 = Date.now();
+    // Thirty seconds, not fifteen. Two regions of shaders and a 512 m island
+    // on a software rasteriser is a slow boot on a loaded machine, and a
+    // timeout that fires while the game is healthily compiling reads exactly
+    // like a broken game.
     await page.waitFor("window.GRIMWARD && window.GRIMWARD.state === 'playing'",
-      { what: 'the game to reach the playing state' });
+      { what: 'the game to reach the playing state', timeout: 30000 });
     ok('the game boots', true, `${Date.now() - t0} ms to playing`);
 
     const err = await page.evaluate('window.GRIMWARD.error || null');
@@ -296,6 +300,28 @@ async function main() {
 
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
+
+    // --- crossing the pass, with the one loading screen in the game ---------
+    const onIsland = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the game starts on the island', onIsland.region === 'verath', onIsland.regionTitle);
+
+    const crossed = await page.evaluate('window.GRIMWARD.crossTo("cleftvale")');
+    ok('the pass leads somewhere', crossed === true, String(crossed));
+    await sleep(400);
+    const inValley = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('and it is a different world', inValley.region === 'cleftvale', inValley.regionTitle);
+    ok('the loading screen put itself away',
+      await page.evaluate('document.getElementById("loading").hidden'));
+    ok('the renderer is drawing the valley', inValley.drawCalls > 0,
+      `${inValley.drawCalls} draws, ${inValley.triangles} triangles`);
+    ok('the man came with us', inValley.gold === onIsland.gold && inValley.level === onIsland.level,
+      `${inValley.gold} gold, level ${inValley.level}`);
+    ok('and crossing raised no error', !(await page.evaluate('window.GRIMWARD.error || null')));
+
+    await page.evaluate('window.GRIMWARD.crossTo("verath")');
+    await sleep(400);
+    const home = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('and there is a way home', home.region === 'verath', home.regionTitle);
 
     // --- saving, through the real game -------------------------------------
     const beforeSave = await page.evaluate('window.GRIMWARD.probeState()');

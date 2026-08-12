@@ -516,3 +516,159 @@ export function buildCrateStack(x, z, ground, yaw = 0) {
   }
   return out;
 }
+
+/**
+ * An ore pit: a terraced hole with a headframe over it and spoil around the rim.
+ *
+ * The valley's whole economy is three of these, so they have to read as *work*
+ * rather than as scenery — the terraces step down, the winch stands over the
+ * shaft, and the spoil heaps are the wrong colour for the ground they sit on.
+ */
+export function buildPit(x, z, ground, seed = 0) {
+  const rng = makeRng(hash(`pit:${x}:${z}:${seed}`));
+  const rock = [0.16, 0.15, 0.14], spoil = [0.13, 0.11, 0.09], timber = [0.19, 0.13, 0.08];
+  const out = [];
+
+  // Four terraces stepping down into the ground. Each ring is eight blocks, so
+  // the hole reads as cut rather than as a smooth bowl.
+  for (let ring = 0; ring < 4; ring++) {
+    const r = 15 - ring * 3.0;
+    const y = ground - ring * 1.5;
+    for (let i = 0; i < 10; i++) {
+      const a = (i / 10) * Math.PI * 2 + ring * 0.31;
+      out.push({
+        pos: [x + Math.cos(a) * r, y - 0.75, z + Math.sin(a) * r],
+        yaw: a, pitch: 0, scale: [r * 0.7, 1.6, 3.0],
+        albedo: rock, tex: MAT.ROCK,
+      });
+    }
+  }
+
+  // The headframe: four legs and a crossbeam over the shaft.
+  for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    out.push({
+      pos: [x + dx * 2.6, ground + 3.0, z + dz * 2.6], yaw: 0, pitch: dz * 0.10, roll: dx * 0.10,
+      scale: [0.34, 6.4, 0.34], albedo: timber, tex: MAT.TIMBER, radius: 0.3,
+    });
+  }
+  out.push({ pos: [x, ground + 6.3, z], yaw: 0, pitch: 0, scale: [6.4, 0.4, 0.5], albedo: timber, tex: MAT.TIMBER });
+  out.push({ pos: [x, ground + 6.3, z], yaw: Math.PI / 2, pitch: 0, scale: [6.4, 0.4, 0.5], albedo: timber, tex: MAT.TIMBER });
+  out.push({ pos: [x, ground + 5.4, z], yaw: 0, pitch: 0, scale: [1.1, 1.1, 1.1], albedo: [0.14, 0.13, 0.13], tex: MAT.STEEL });
+
+  // Spoil heaps and a few abandoned barrows.
+  for (let i = 0; i < 7; i++) {
+    const a = rng.range(0, Math.PI * 2), r = rng.range(17, 25);
+    const w = rng.range(3.5, 7);
+    out.push({
+      pos: [x + Math.cos(a) * r, ground + 0.6, z + Math.sin(a) * r],
+      yaw: a, pitch: 0, scale: [w, 1.5, w * 0.8], albedo: spoil, tex: MAT.DIRT,
+    });
+  }
+  for (let i = 0; i < 3; i++) {
+    const a = rng.range(0, Math.PI * 2);
+    out.push({
+      pos: [x + Math.cos(a) * 13, ground + 0.45, z + Math.sin(a) * 13],
+      yaw: a, pitch: 0, scale: [1.5, 0.9, 0.9], albedo: [0.22, 0.16, 0.09], tex: MAT.PLANK, radius: 0.7,
+    });
+  }
+  return out;
+}
+
+/**
+ * A mining camp: a palisade, a longhouse, tents and a fire.
+ *
+ * The valley's one safe place, and it has to look like somebody built it in a
+ * hurry and has been defending it since — sharpened stakes rather than masonry,
+ * tents rather than houses, and everything facing inward.
+ */
+export function buildCamp(x, z, ground, groundAt = null) {
+  const stake = [0.17, 0.12, 0.075], canvas = [0.21, 0.19, 0.15];
+  const out = [];
+  const g = groundAt || (() => ground);
+
+  // The palisade: stakes on an ellipse, with a gap facing the pass.
+  const rx = 24, rz = 20, N = 64;
+  for (let i = 0; i < N; i++) {
+    const a = (i / N) * Math.PI * 2;
+    let da = a - Math.PI / 2;
+    while (da > Math.PI) da -= Math.PI * 2;
+    while (da < -Math.PI) da += Math.PI * 2;
+    if (Math.abs(da) < 0.18) continue;                 // the gate
+    const px = x + Math.cos(a) * rx, pz = z + Math.sin(a) * rz;
+    out.push({
+      pos: [px, g(px, pz) + 1.9, pz], yaw: a, pitch: 0,
+      scale: [0.42, 4.2, 0.42], albedo: stake, tex: MAT.TIMBER, radius: 0.4,
+    });
+    if (i % 2 === 0) {
+      out.push({
+        pos: [px, g(px, pz) + 4.2, pz], yaw: a, pitch: 0,
+        scale: [0.34, 0.7, 0.34], albedo: [0.12, 0.09, 0.06], tex: MAT.TIMBER,
+      });
+    }
+  }
+
+  // A longhouse for whoever gives the orders, and four tents for whoever takes
+  // them.
+  out.push(...buildHouse({ x: x - 6, z: z - 8, ground: g(x - 6, z - 8), yaw: 0.2, w: 13, d: 7, storeys: 1, seed: 3 }));
+  for (let i = 0; i < 4; i++) {
+    const a = 0.5 + i * 0.7;
+    const tx = x + Math.cos(a) * 13, tz = z + Math.sin(a) * 11;
+    const ty = g(tx, tz);
+    out.push({ pos: [tx, ty + 1.1, tz], yaw: a, pitch: 0, scale: [4.2, 2.2, 3.6], albedo: canvas, tex: MAT.CLOTH, box: [4.2, 3.6] });
+    out.push({ pos: [tx, ty + 2.5, tz], yaw: a, pitch: 0, scale: [3.2, 1.0, 2.8], albedo: [0.17, 0.15, 0.12], tex: MAT.CLOTH });
+  }
+
+  // The fire everyone sits round, and the logs they sit on.
+  out.push({ pos: [x + 4, g(x + 4, z + 3) + 0.25, z + 3], yaw: 0.3, pitch: 0, scale: [2.6, 0.5, 2.6], albedo: [0.09, 0.08, 0.07], tex: MAT.ROCK });
+  out.push({ pos: [x + 4, g(x + 4, z + 3) + 0.7, z + 3], yaw: 0.8, pitch: 0, scale: [1.1, 0.9, 1.1], albedo: [0.30, 0.13, 0.05], tex: MAT.FLAT });
+  for (const [dx, dz] of [[3.2, -1.6], [5.2, 6.0], [8.0, 2.4]]) {
+    out.push({
+      pos: [x + dx, g(x + dx, z + dz) + 0.3, z + dz], yaw: dx * 0.4, pitch: 0,
+      scale: [3.4, 0.6, 0.6], albedo: [0.16, 0.12, 0.08], tex: MAT.TIMBER, radius: 0.4,
+    });
+  }
+  return out;
+}
+
+/** A keep: a square block of masonry with corner towers and one door. */
+export function buildKeep(x, z, ground, groundAt = null) {
+  const stone = [0.19, 0.185, 0.175], dark = [0.14, 0.135, 0.13];
+  const out = [];
+  out.push({ pos: [x, ground + 7, z], yaw: 0, pitch: 0, scale: [24, 14, 20], albedo: stone, tex: MAT.ROCK, box: [24, 20] });
+  out.push({ pos: [x, ground + 14.6, z], yaw: 0, pitch: 0, scale: [26, 1.2, 22], albedo: dark, tex: MAT.ROCK });
+  for (const [dx, dz] of [[1, 1], [1, -1], [-1, 1], [-1, -1]]) {
+    out.push({
+      pos: [x + dx * 12, ground + 9, z + dz * 10], yaw: 0.2, pitch: 0,
+      scale: [7, 18, 7], albedo: stone, tex: MAT.ROCK, radius: 3.8,
+    });
+    out.push({
+      pos: [x + dx * 12, ground + 18.4, z + dz * 10], yaw: 0.2, pitch: 0,
+      scale: [8.2, 0.8, 8.2], albedo: dark, tex: MAT.ROCK,
+    });
+  }
+  // Merlons along the front, and the door.
+  for (let i = -5; i <= 5; i++) {
+    out.push({ pos: [x + i * 2.2, ground + 15.6, z + 10.6], yaw: 0, pitch: 0, scale: [1.3, 1.4, 1.0], albedo: dark, tex: MAT.ROCK });
+  }
+  out.push({ pos: [x, ground + 2.4, z + 10.2], yaw: 0, pitch: 0, scale: [3.4, 4.8, 0.5], albedo: [0.09, 0.07, 0.05], tex: MAT.PLANK });
+  out.push(...buildWall({ x, z, ground, groundAt, rx: 34, rz: 30, gateAngle: Math.PI / 2, height: 6.0, segments: 44 }));
+  return out;
+}
+
+/** A shrine: standing stones round a fire pit, and nothing else for a mile. */
+export function buildShrine(x, z, ground) {
+  const rock = [0.155, 0.15, 0.145];
+  const out = [];
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * Math.PI * 2;
+    const h = 4.5 + (i % 3) * 1.6;
+    out.push({
+      pos: [x + Math.cos(a) * 9, ground + h / 2, z + Math.sin(a) * 9],
+      yaw: a + 0.2, pitch: Math.sin(i * 2.1) * 0.06,
+      scale: [1.8, h, 1.0], albedo: rock, tex: MAT.ROCK, radius: 1.0,
+    });
+  }
+  out.push({ pos: [x, ground + 0.3, z], yaw: 0.4, pitch: 0, scale: [4.4, 0.6, 4.4], albedo: [0.11, 0.10, 0.10], tex: MAT.ROCK });
+  out.push({ pos: [x, ground + 1.0, z], yaw: 0.9, pitch: 0, scale: [1.6, 1.0, 1.6], albedo: [0.26, 0.10, 0.04], tex: MAT.FLAT });
+  return out;
+}

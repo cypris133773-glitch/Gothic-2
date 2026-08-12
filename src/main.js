@@ -8,7 +8,7 @@
 import { detect, initialTier, refusalReason } from './core/caps.js';
 import { createDevice } from './render/device.js';
 import { createInput, idleIntent } from './core/input.js';
-import { createWorld } from './world/world.js';
+import { createWorld, travel } from './world/world.js';
 import { createOverlay, FrameTimer, log } from './core/log.js';
 import { STATE_NAME } from './game/combat.js';
 import { createStorage } from './core/save.js';
@@ -50,10 +50,11 @@ async function boot() {
     shadowSize: tier === 'high' ? 2048 : 1024,
     textures: !off.has('textures') && tier !== 'low',
   });
-  const world = createWorld({
+  let world = createWorld({
     seed: Number(params.get('seed')) || 1,
     hour: params.has('time') ? Number(params.get('time')) : 9,
     props: params.has('props') ? Number(params.get('props')) : undefined,
+    region: params.get('region') || undefined,
     lineup: params.has('lineup')
       ? (params.get('lineup') ? params.get('lineup').split(',').filter(Boolean) : true)
       : false,
@@ -77,6 +78,51 @@ async function boot() {
   };
   rebuildTerrain();
 
+  // --- crossing the pass ------------------------------------------------------
+  //
+  // The island streams; you can walk from the harbour to the mouth of the Cleft
+  // without a pause. The valley on the other side is a *different world* — its
+  // own heightfield, its own buildings, its own inhabitants — and building one
+  // is a real half-second of work, so it gets the one loading screen in the
+  // game. That is a design decision rather than a concession: the pass is the
+  // place the player is meant to feel they have left everything behind.
+  let lastQuestCount = 0;
+  const loadEl = document.getElementById('loading');
+  const whereEl = document.getElementById('loading-where');
+  const noteEl = document.getElementById('loading-note');
+  let travelling = false;
+
+  async function crossTo(to) {
+    if (travelling) return false;
+    travelling = true;
+    whereEl.textContent = to === 'cleftvale' ? 'The Cleft valley' : 'The island of Verath';
+    noteEl.textContent = to === 'cleftvale'
+      ? 'Past the barricade the road belongs to whatever has been eating the ore convoys.'
+      : 'The road home.';
+    loadEl.hidden = false;
+    // Two frames of the screen actually on the glass before the main thread
+    // disappears into world generation. Without them the browser coalesces the
+    // paint with the one after the build and the screen never shows.
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+    const t0 = performance.now();
+    const result = travel(world, to, { props: world.props.length });
+    if (!result.ok) {
+      log(`could not travel: ${result.why}`);
+      loadEl.hidden = true; travelling = false;
+      return false;
+    }
+    world = result.world;
+    api.world = world;
+    rebuildTerrain();
+    terrainCell = world.terrainCell();
+    lastQuestCount = world.quests.size;
+    log(`${result.title} — built in ${Math.round(performance.now() - t0)} ms`);
+    loadEl.hidden = true;
+    travelling = false;
+    renderBook();
+    return true;
+  }
+
   const input = createInput(canvas);
   const overlay = createOverlay(document.getElementById('overlay'));
   const timer = new FrameTimer();
@@ -85,6 +131,9 @@ async function boot() {
 
   const api = {
     state: 'playing', caps, tier, world, device, input,
+    // Exposed so the browser harness can cross the pass without walking there,
+    // and so a bug report can say "load the valley and look at this".
+    crossTo,
     frames: 0,
     // What the browser-side tests read. Everything here is simulation state,
     // never input state: the loop drains input every tick, so reading it back
@@ -108,6 +157,8 @@ async function boot() {
       flags: [...world.flags],
       trainer: world.openTrainer ? world.openTrainer.skill : null,
       chapter: world.chapter,
+      region: world.region, regionTitle: world.regionTitle,
+      pendingTravel: world.pendingTravel,
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
@@ -127,7 +178,6 @@ async function boot() {
   // is a few kilobytes because it stores what changed rather than the world.
   const storage = createStorage(caps);
   if (storage.inMemory) log('storage unavailable — saves last only for this session');
-  let lastQuestCount = 0;
 
   async function save(slot = 'auto') {
     try {
@@ -142,6 +192,10 @@ async function boot() {
     try {
       const data = await storage.get(slot);
       if (!data) { log(`no save in ${slot}`); return false; }
+      // A save says which world it is in, and restoring into the wrong one is
+      // refused rather than fudged. Cross first if it names the other region.
+      const region = data.region || 'verath';
+      if (region !== world.region) await crossTo(region);
       world.restore(data);
       rebuildTerrain();
       log(`loaded ${slot}`);
@@ -457,6 +511,11 @@ async function boot() {
     // will join it once those exist (§5.3).
     if (world.quests.size !== lastQuestCount) { lastQuestCount = world.quests.size; save('auto'); }
 
+    // Standing in an exit takes you through it. There is no prompt: the
+    // barricade at the mouth of the pass is visible from a hundred metres and
+    // walking into it is the whole of the interaction.
+    if (world.pendingTravel && !travelling) { crossTo(world.pendingTravel); return; }
+
     const cell = world.terrainCell();
     if (cell !== terrainCell) { terrainCell = cell; rebuildTerrain(); }
 
@@ -487,6 +546,7 @@ async function boot() {
         near: world.dialogue.isOpen ? 'talking' : (world.speaker() ? 'E to talk' : ''),
         clock: `day ${world.clock.day} ${world.clock.hhmm}${world.clock.isNight ? ' (night)' : ''}`,
         terrain: `cell ${terrainCell}  rebuilt in ${terrainMs} ms`,
+        where: `${world.regionTitle}  ·  chapter ${world.chapter}`,
         seed: String(world.seed),
       });
     }

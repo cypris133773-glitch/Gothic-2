@@ -13,7 +13,9 @@ import {
 import {
   buildHouse, buildWell, buildStall, buildWall, buildFarm, buildTower,
   buildLighthouse, buildMonastery, buildCleftGate, buildDoor, buildCrateStack,
+  buildPit, buildCamp, buildKeep, buildShrine,
 } from './buildings.js';
+import { REGIONS, DEFAULT_REGION, region as regionOf } from './regions.js';
 import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
 import { poseHumanoid, advanceGait, KITS, kitForArmour } from '../game/rig.js';
@@ -161,6 +163,35 @@ function buildCity(terrain, seed) {
 
   return boxes;
 }
+
+/**
+ * The Cleft valley: a camp, three ore pits, a keep and a shrine.
+ *
+ * Built from the region's own places, exactly as the island is. A region is
+ * data plus one entry in the builder table below; that is the whole cost of
+ * the second world.
+ */
+function buildValley(terrain, seed) {
+  const g = (x, z) => terrain.heightAt(x, z);
+  const P = terrain.places;
+  const boxes = [];
+  const at = (k) => P[k].at;
+
+  boxes.push(...buildCleftGate(at('gate')[0], at('gate')[1], g(...at('gate'))));
+  boxes.push(...buildCamp(at('camp')[0], at('camp')[1], g(...at('camp')), g));
+  for (const [i, k] of ['pit_one', 'pit_two', 'pit_three'].entries()) {
+    boxes.push(...buildPit(at(k)[0], at(k)[1], g(...at(k)), seed + i * 13));
+  }
+  boxes.push(...buildKeep(at('keep')[0], at('keep')[1], g(...at('keep')), g));
+  boxes.push(...buildShrine(at('shrine')[0], at('shrine')[1], g(...at('shrine'))));
+  return boxes;
+}
+
+/** Which builders make which region. Adding a third region is one line here. */
+const BUILDERS = {
+  verath: (terrain, seed) => [...buildCity(terrain, seed), ...buildOutlands(terrain, seed)],
+  cleftvale: (terrain, seed) => buildValley(terrain, seed),
+};
 
 /** Everything outside the walls: five farms, three landmarks and the pass. */
 function buildOutlands(terrain, seed) {
@@ -330,7 +361,9 @@ function stepPerson(p, terrain, dt) {
 
 export function createWorld(opts = {}) {
   const seed = opts.seed || 1;
-  const terrain = createTerrain(seed);
+  const regionName = opts.region || DEFAULT_REGION;
+  const R = regionOf(regionName);
+  const terrain = createTerrain(seed, regionName);
   const clock = new Clock((opts.hour ?? 9) * 60);
   // One seeded stream for everything that happens in a fight. Combat used
   // Math.random, which meant two runs of the same seed diverged the moment a
@@ -347,7 +380,7 @@ export function createWorld(opts = {}) {
   // roofs. It is the first thing anybody sees and it is chosen to be the shot
   // that says what the city is — the well used to be *behind* the camera, so
   // the opening frame was three quarters of a wooden post.
-  const start = opts.start || (opts.lineup ? [0, -30] : [0, 26]);
+  const start = opts.start || (opts.lineup ? [0, -30] : R.arrive);
   const player = createPlayer(start[0], start[1], terrain);
   player.yaw = opts.yaw ?? Math.PI;           // by default, looking up the street
   // He starts in what he arrived in, which is rags. The knight kit is the
@@ -390,12 +423,14 @@ export function createWorld(opts = {}) {
 
   // Props reach as far as the furthest landmark now: the island is 340 m across
   // the built area, not the 110 m ring the first town sat in.
-  const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 520), [-190, -160, 200, 150]);
-  const town = (opts.town === false || opts.lineup)
-    ? []
-    : [...buildCity(terrain, seed), ...buildOutlands(terrain, seed)];
+  const bound = terrain.size * 0.38;
+  const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 520), [-bound, -bound, bound, bound]);
+  const town = (opts.town === false || opts.lineup) ? [] : BUILDERS[regionName](terrain, seed);
   const people = opts.lineup ? makeLineup(terrain, opts.lineup)
-    : opts.people === false ? [] : makePeople(terrain, seed);
+    : opts.people === false ? []
+      // Only the island is populated. The valley's inhabitants are the reason
+      // it is the valley, and they are not people.
+      : regionName === DEFAULT_REGION ? makePeople(terrain, seed) : [];
 
   // Wolves, out past the fields. Nothing is placed on a road, on a pad or
   // inside the walls: the whole point of the design is that the road is safe
@@ -410,21 +445,33 @@ export function createWorld(opts = {}) {
     // across and the same seven made it empty countryside. Population is a
     // property of area, and an island you can cross without meeting anything
     // is not dangerous however hard one wolf hits.
-    const wanted = opts.beasts ?? 34;
+    // The valley is smaller and much worse. Density is per region, not global.
+    const wanted = opts.beasts ?? (regionName === DEFAULT_REGION ? 34 : 26);
     // `beastsAround` puts the pack somewhere specific, which is how the hunt
     // harness gets a wood to fight in without teleporting anything.
     const [hx, hz] = opts.beastsAround || [0, 0];
     const near = !!opts.beastsAround;
     for (let i = 0; i < wanted * 40 && beasts.length < wanted; i++) {
       const a = brng.range(0, Math.PI * 2);
-      const r = near ? brng.range(8, 46) : brng.range(52, 172);
+      const r = near ? brng.range(8, 46)
+        : regionName === DEFAULT_REGION ? brng.range(52, 172) : brng.range(30, 150);
       const x = hx + Math.cos(a) * r, z = hz + Math.sin(a) * r;
       if (terrain.heightAt(x, z) < 1.2 || terrain.slopeAt(x, z) > 0.5) continue;
       if (terrain.padFactor(x, z) > 0.22) continue;     // not on the road or in a yard
       // Distance from the gate is the difficulty curve, so the further out a
       // spawn lands the likelier it is to be the thing with tusks.
       const far = Math.min(1, (Math.hypot(x, z) - 52) / 100);
-      beasts.push(createBeast(brng.chance(0.78 - far * 0.4) ? 'wolf' : 'boar', x, z, terrain, brng));
+      const b = createBeast(brng.chance(0.78 - far * 0.4) ? 'wolf' : 'boar', x, z, terrain, brng);
+      if (regionName !== DEFAULT_REGION) {
+        // Everything past the pass has been living on ore and each other. This
+        // is the chapter-three wall stated as arithmetic rather than as a
+        // locked door — you can walk in at level two and you will not walk out.
+        b.maxHp = Math.round(b.maxHp * 1.9);
+        b.hp = b.maxHp;
+        b.str = Math.round((b.str || 10) * 1.7);
+        b.valley = true;
+      }
+      beasts.push(b);
     }
   }
   const beastParts = beasts.map(() => []);
@@ -434,7 +481,7 @@ export function createWorld(opts = {}) {
   // *found* by walking out of the land gate and down the road.
   const crates = [];
   const CRATES_AT = [-30, 62];
-  if (!opts.lineup) {
+  if (!opts.lineup && regionName === DEFAULT_REGION) {
     const [cx, cz] = CRATES_AT;
     const cy = terrain.heightAt(cx, cz);
     for (let i = 0; i < 3; i++) {
@@ -454,7 +501,7 @@ export function createWorld(opts = {}) {
   // scene and out of the obstacle list. Nothing anywhere reads "the player may
   // not go north".
   const doors = [];
-  if (!opts.lineup && opts.town !== false) {
+  if (!opts.lineup && opts.town !== false && regionName === DEFAULT_REGION) {
     const u = CITY.upper;
     const ug = gatePoint(u.at[0], u.at[1], u.rx, u.rz, u.gate);
     doors.push({
@@ -532,7 +579,15 @@ export function createWorld(opts = {}) {
   const world = {
     seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
-    crates, gates, places: PLACES, city: CITY,
+    crates, gates, places: terrain.places, city: CITY,
+    region: regionName, regionTitle: R.title,
+    // Set when the player is standing in an exit and may use it. The world
+    // cannot replace itself, so travelling is the caller's job: main.js reads
+    // this each frame, puts up the loading screen and calls `travel`.
+    pendingTravel: null,
+    // Set by `travel` on arrival and cleared the first time the player is clear
+    // of every exit.
+    travelLock: false,
 
     /** Experience goes to the sheet, which hands out levels and learning points. */
     awardXp(amount, reason = 'quest') {
@@ -617,6 +672,14 @@ export function createWorld(opts = {}) {
           if (terrain.padFactor(x, z) > 0.3) continue;
           const b = createBeast(crng.chance(0.45) ? 'wolf' : 'boar', x, z, terrain, crng);
           b.ring = n;
+          // A chapter's arrivals in the valley are valley creatures too. They
+          // used to be island-strength wolves standing next to things twice
+          // their size, which read as a bug and was one.
+          if (regionName !== DEFAULT_REGION) {
+            b.valley = true;
+            b.maxHp = Math.round(b.maxHp * 1.9);
+            b.str = Math.round((b.str || 10) * 1.7);
+          }
           // The far ring is not the same wolf further away. It hits harder and
           // it takes more, because chapter three's job is to make the road you
           // already know worth being careful on again.
@@ -631,6 +694,49 @@ export function createWorld(opts = {}) {
       // A trader's stock is a chapter-boundary thing, never a timer (§6.7).
       traders.clear();
       return n;
+    },
+
+    /**
+     * Everything that survives crossing the pass.
+     *
+     * The regions are separate worlds — separate terrain, separate buildings,
+     * separate creatures — and this is the list of what is *not* separate: the
+     * man, what he is carrying, what he knows, what he has been asked to do,
+     * what time it is, and which chapter he is in. Beasts are deliberately not
+     * on it: the valley repopulates, and the island you come back to has moved
+     * on, which is the same thing a chapter change says.
+     */
+    persist() {
+      return {
+        character, inventory,
+        flags: [...flags], quests: [...quests.entries()],
+        chapter: world.chapter,
+        clock: { day: clock.day, minutes: clock.minutes },
+        hp: player.fighter.hp, yaw: player.yaw,
+        traders: world.traderState(),
+      };
+    },
+
+    /** Put that state into a freshly built world. */
+    adopt(state) {
+      Object.assign(character, state.character);
+      inventory.items = new Map(state.inventory.items);
+      inventory.weapon = state.inventory.weapon;
+      inventory.armour = state.inventory.armour;
+      flags.clear();
+      for (const f of state.flags) flags.add(f);
+      quests.clear();
+      for (const [k, v] of state.quests) quests.set(k, v);
+      world.chapter = state.chapter;
+      clock.day = state.clock.day;
+      clock.minutes = state.clock.minutes;
+      player.fighter.hp = state.hp;
+      player.yaw = state.yaw;
+      world.restoreTraders(state.traders || []);
+      world.reloadout();
+      world.applyChapter(world.chapter);
+      if (flags.has('pass:upper')) world.openDoor('upper');
+      return world;
     },
 
     /** Take a door out of the world. Idempotent; the geometry only goes once. */
@@ -791,6 +897,32 @@ export function createWorld(opts = {}) {
           world.awardXp(800, 'quest');
         }
       }
+
+      // Standing in an exit. Both ends of the pass are exits, so walking back
+      // out of the valley works the same way walking in did.
+      //
+      // The lock is why arriving somewhere does not immediately send you back.
+      // A player put down near the mouth of the pass is standing in the thing
+      // that would take them through it, so an exit does nothing until they
+      // have stepped out of every exit at least once. `returnAt` already keeps
+      // them clear of it; this makes the rule true rather than merely likely.
+      world.pendingTravel = null;
+      let inAnyExit = false;
+      for (const exit of terrain.exits) {
+        const d = Math.hypot(player.pos[0] - exit.at[0], player.pos[2] - exit.at[1]);
+        if (d > exit.radius) continue;
+        inAnyExit = true;
+        if (world.travelLock) continue;
+        if (exit.needs && !flags.has(exit.needs)) {
+          // The pass is not locked — it is *unknown*. Until somebody has told
+          // you the road east is worth walking, standing at the barricade does
+          // nothing, and the barricade itself can be climbed round at any time.
+          continue;
+        }
+        world.pendingTravel = exit.to;
+        break;
+      }
+      if (!inAnyExit) world.travelLock = false;
 
       // Chapters advance when their conditions come true and never otherwise.
       // Checked here rather than fired from a conversation so that every route
@@ -1017,3 +1149,44 @@ export function createWorld(opts = {}) {
 createWorld.headless = (opts) => createWorld(opts);
 
 export { HEIGHT };
+
+
+/**
+ * Cross the pass.
+ *
+ * Building the other side is not a variation on this world, it is a different
+ * one — different heightfield, different buildings, different things living in
+ * it — so travelling builds a new world and moves the man into it. That is also
+ * why this is the one place in the game with a loading screen: there is
+ * genuinely a world to load, and pretending otherwise would mean streaming two
+ * regions that never share a horizon.
+ *
+ * `travel` is pure with respect to the old world: it reads its persistent state
+ * and does not modify it, so a caller that fails to swap its reference has an
+ * unchanged game rather than a broken one.
+ */
+export function travel(world, to, opts = {}) {
+  const R = regionOf(to);
+  if (!REGIONS[to]) return { ok: false, why: `there is no region called ${to}` };
+  if (to === world.region) return { ok: false, why: `already in ${to}` };
+  const state = world.persist();
+  const next = createWorld({
+    ...opts,
+    seed: world.seed,
+    region: to,
+    // The clock is carried, so `hour` must not re-set it.
+    hour: undefined,
+  });
+  next.adopt(state);
+  // Arrive where the region says arrivals land, which is deliberately not the
+  // exit itself.
+  const [ax, az] = R.returnAt || R.arrive;
+  next.player.pos[0] = ax;
+  next.player.pos[2] = az;
+  next.player.pos[1] = next.terrain.heightAt(ax, az);
+  next.travelLock = true;
+  next.player.vel.set([0, 0, 0]);
+  next.player.onGround = true;
+  next.log.push(`${R.title}.`);
+  return { ok: true, world: next, title: R.title };
+}

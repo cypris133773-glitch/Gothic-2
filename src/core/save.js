@@ -15,7 +15,7 @@
 // one, and a file from a version we have never heard of is refused politely
 // rather than loaded into an undefined state.
 
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 export const DB_NAME = 'grimward';
 export const STORE = 'saves';
 
@@ -42,6 +42,9 @@ export const MIGRATIONS = {
     inventory: d.inventory || { items: [['branch', 1], ['rags', 1]], weapon: 'branch', armour: 'rags' },
     traders: d.traders || [],
   }),
+  // v3 had one world. A v3 save is on the island, because there was nowhere
+  // else to be.
+  3: (d) => ({ ...d, version: 4, region: d.region || 'verath' }),
 };
 
 /** Everything a save needs to know, as plain JSON. */
@@ -51,6 +54,10 @@ export function snapshot(world) {
     version: SAVE_VERSION,
     saved: new Date().toISOString(),
     seed: world.seed,
+    // Which world this save is *in*. A save carries deltas against the seed,
+    // and the seed builds a different place in each region, so a save that does
+    // not say which one is a save that cannot be loaded.
+    region: world.region || 'verath',
     // The clock is world state, not player state, and forgetting it is how a
     // reload used to teleport the player from dusk back to nine in the morning.
     clock: { day: world.clock.day, minutes: world.clock.minutes },
@@ -90,6 +97,13 @@ export function restore(world, data) {
   const d = migrate(data);
   if (d.seed !== world.seed) {
     throw new Error(`this save is of world ${d.seed}, and this is world ${world.seed}`);
+  }
+  const region = d.region || 'verath';
+  if (region !== (world.region || 'verath')) {
+    // The caller has to build the right region first. Refusing is the only
+    // honest answer: restoring valley positions into island terrain would put
+    // the player inside a hill and look like a physics bug.
+    throw new Error(`this save is in ${region}, and this world is ${world.region}`);
   }
   world.clock.day = d.clock.day;
   world.clock.minutes = d.clock.minutes;

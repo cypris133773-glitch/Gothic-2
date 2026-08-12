@@ -185,6 +185,34 @@ async function main() {
       `${dist2(landed.camera, landed.pos).toFixed(2)} m`);
     ok('the camera is above the ground', landed.camera[1] > landed.pos[1] - 1);
 
+    // --- combat, through real key events ----------------------------------
+    // The rule the whole system rests on, asserted through the browser's own
+    // input path rather than by calling into the fighter.
+    await page.keyDown('KeyF');
+    await sleep(60);
+    const swinging = await page.evaluate('window.GRIMWARD.probeState().combat');
+    await page.keyUp('KeyF');
+    ok('F starts a swing', swinging.state === 1 || swinging.state === 2 || swinging.state === 3,
+      `state ${swinging.state}, ${swinging.swings} swings`);
+
+    // Try to cancel it with everything a panicking player would press.
+    await page.keyDown('KeyF');
+    await sleep(30);
+    await page.keyDown('KeyG');          // block
+    await page.keyDown('Space');         // jump
+    const cancel = await page.evaluate('window.GRIMWARD.probeState().combat');
+    await page.keyUp('KeyG'); await page.keyUp('Space'); await page.keyUp('KeyF');
+    ok('a swing cannot be cancelled by blocking or jumping',
+      cancel.state !== 0 && cancel.state !== 4 && cancel.state !== 5,
+      `state ${cancel.state}`);
+
+    await sleep(900);
+    const settled = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the swing ends on its own', settled.combat.state === 0 || settled.combat.state === 3,
+      `state ${settled.combat.state}, ${settled.combat.swings} swings total`);
+    ok('there are beasts in the world', settled.beasts.length > 0,
+      `${settled.beasts.length}: ${settled.beasts.slice(0, 3).map((b) => `${b.kind} at ${b.dist} m`).join(', ')}`);
+
     // --- the world keeps time ---------------------------------------------
     ok('the clock is running', /^\d\d:\d\d$/.test(landed.clock), landed.clock);
 

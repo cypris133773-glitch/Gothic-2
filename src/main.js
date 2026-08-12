@@ -10,6 +10,7 @@ import { createDevice } from './render/device.js';
 import { createInput, idleIntent } from './core/input.js';
 import { createWorld } from './world/world.js';
 import { createOverlay, FrameTimer, log } from './core/log.js';
+import { STATE_NAME } from './game/combat.js';
 
 const TICK_MS = 1000 / 60;          // the simulation is 60 Hz, always
 const MAX_CATCHUP_MS = 250;         // a backgrounded tab must not simulate four minutes on return
@@ -84,6 +85,14 @@ async function boot() {
       yaw: world.player.yaw, speed: world.player.speed,
       onGround: world.player.onGround, sneaking: world.player.sneaking,
       camera: [...world.camera.pos], camDist: world.camera.dist,
+      combat: {
+        state: world.player.fighter.state, t: world.player.fighter.t,
+        hp: world.player.fighter.hp, swings: world.player.fighter.swings,
+        hits: world.player.fighter.hits, combo: world.player.fighter.combo,
+      },
+      xp: world.player.xp, level: world.player.level,
+      beasts: world.beasts.map((b) => ({ kind: b.kind, hp: b.hp, state: b.state,
+        dist: +Math.hypot(b.pos[0] - world.player.pos[0], b.pos[2] - world.player.pos[2]).toFixed(2) })),
       clock: world.clock.hhmm, ticks: world.ticks, frames: api.frames,
       frame: timer.percentiles(),
       ...device.stats,
@@ -194,6 +203,9 @@ async function boot() {
         res: `${s.width}×${s.height}`,
         pos: `${pl.pos[0].toFixed(1)} ${pl.pos[1].toFixed(1)} ${pl.pos[2].toFixed(1)}  ${pl.speed.toFixed(1)} m/s`,
         state: `${pl.onGround ? 'ground' : 'air'}${pl.sneaking ? ' · sneaking' : ''}  cam ${world.camera.dist.toFixed(1)} m`,
+        fight: `${STATE_NAME[pl.fighter.state]}${pl.fighter.t ? ` ${pl.fighter.t}` : ''}`
+          + `  hp ${pl.fighter.hp}/${pl.fighter.maxHp}  combo ${pl.fighter.combo}`,
+        hunt: `${world.beasts.filter((b) => b.state !== 7).length} alive  xp ${pl.xp}  level ${pl.level}`,
         clock: `day ${world.clock.day} ${world.clock.hhmm}${world.clock.isNight ? ' (night)' : ''}`,
         terrain: `cell ${terrainCell}  rebuilt in ${terrainMs} ms`,
         seed: String(world.seed),

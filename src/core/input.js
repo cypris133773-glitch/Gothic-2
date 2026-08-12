@@ -21,6 +21,8 @@ const DEFAULT_BINDINGS = {
   jump: ['Space'],
   sneak: ['ControlLeft', 'KeyC'],
   walk: ['ShiftLeft'],
+  attack: ['KeyF'],
+  block: ['KeyG'],
 };
 
 export function createInput(canvas, opts = {}) {
@@ -28,6 +30,7 @@ export function createInput(canvas, opts = {}) {
   const bindings = { ...DEFAULT_BINDINGS, ...(opts.bindings || {}) };
   const sensitivity = opts.sensitivity || 0.0022;
   let mouseDX = 0, mouseDY = 0;
+  let mouseAttack = false, mouseBlock = false;
   let locked = false;
 
   const held = (action) => bindings[action].some((code) => down.has(code));
@@ -52,6 +55,18 @@ export function createInput(canvas, opts = {}) {
     document.addEventListener('pointerlockchange', () => {
       locked = document.pointerLockElement === canvas;
     });
+    // The mouse buttons are the real bindings for a fight; the keys exist so
+    // the game is playable without pointer lock and so the headless harness can
+    // drive a swing through a key event.
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) mouseAttack = true;
+      if (e.button === 2) mouseBlock = true;
+    });
+    addEventListener('mouseup', (e) => {
+      if (e.button === 0) mouseAttack = false;
+      if (e.button === 2) mouseBlock = false;
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     addEventListener('mousemove', (e) => {
       if (!locked) return;
       mouseDX += e.movementX * sensitivity;
@@ -61,7 +76,7 @@ export function createInput(canvas, opts = {}) {
 
   const intent = {
     forward: 0, strafe: 0, turn: 0, look: 0,
-    jump: false, sneak: false, run: true,
+    jump: false, sneak: false, run: true, attack: false, block: false,
   };
 
   return {
@@ -79,6 +94,8 @@ export function createInput(canvas, opts = {}) {
       intent.jump = held('jump');
       intent.sneak = held('sneak');
       intent.run = !held('walk');
+      intent.attack = held('attack') || mouseAttack;
+      intent.block = held('block') || mouseBlock;
       mouseDX = 0; mouseDY = 0;
       return intent;
     },
@@ -89,5 +106,8 @@ export function createInput(canvas, opts = {}) {
 
 /** An intent that does nothing — the starting point for bots and cutscenes. */
 export function idleIntent() {
-  return { forward: 0, strafe: 0, turn: 0, look: 0, jump: false, sneak: false, run: true };
+  return {
+    forward: 0, strafe: 0, turn: 0, look: 0,
+    jump: false, sneak: false, run: true, attack: false, block: false,
+  };
 }

@@ -9,12 +9,15 @@
 
 import { createTerrain, buildChunk, scatter } from './terrain.js';
 import { buildHouse, buildWell, buildStall } from './buildings.js';
-import { createPlayer, stepPlayer, HEIGHT } from '../game/player.js';
+import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
 import { poseHumanoid, advanceGait, KITS } from '../game/rig.js';
 import { Clock, keyLightDirection, skyPalette } from '../core/time.js';
 import { idleIntent } from '../core/input.js';
 import { makeRng } from '../core/rng.js';
+import { createFighter, stepFighter, resolveStrike, isStriking, S } from '../game/combat.js';
+import { createBeast, stepBeast, poseBeast, BEASTS } from '../game/beast.js';
+import { meleeDamage, levelForXp } from '../game/progression.js';
 
 export const CHUNK = 64;         // metres per terrain chunk
 // Vertices per side by ring: dense underfoot, coarse at the horizon. The last
@@ -151,10 +154,32 @@ export function createWorld(opts = {}) {
   player.phase = 0;
   const camera = createCamera();
 
+  // The player is a fighter as well as a body. Both are needed: one owns where
+  // he is standing, the other owns what his blade is doing.
+  player.fighter = createFighter({ hp: 120, str: 25, skill: opts.skill ?? 30, weapon: 'oneHanded' });
+  player.fighter.pos = player.pos;              // one position, shared
+  player.xp = 0; player.level = 0;
+
   const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 260), [-110, -110, 110, 110]);
   const town = (opts.town === false || opts.lineup) ? [] : buildTown(terrain, seed);
   const people = opts.lineup ? makeLineup(terrain)
     : opts.people === false ? [] : makePeople(terrain, seed);
+
+  // Wolves, out past the fields. Nothing is placed inside the town: the whole
+  // point of the design is that the road is safe and the woods are not, and a
+  // wolf on the market square would say the opposite (§4, P2).
+  const beasts = [];
+  if (!opts.lineup && opts.beasts !== false) {
+    const brng = makeRng(seed * 31337 + 5);
+    const wanted = opts.beasts ?? 7;
+    for (let i = 0; i < wanted * 12 && beasts.length < wanted; i++) {
+      const a = brng.range(0, Math.PI * 2), r = brng.range(34, 92);
+      const x = Math.cos(a) * r, z = Math.sin(a) * r;
+      if (terrain.heightAt(x, z) < 1.2 || terrain.slopeAt(x, z) > 0.5) continue;
+      beasts.push(createBeast(brng.chance(0.75) ? 'wolf' : 'boar', x, z, terrain));
+    }
+  }
+  const beastParts = beasts.map(() => []);
 
   // Everything the character controller can bump into.
   const obstacles = [...props, ...town].filter((b) => b.radius || b.box);
@@ -176,7 +201,7 @@ export function createWorld(opts = {}) {
   };
 
   return {
-    seed, terrain, clock, player, camera, props, town, people, obstacles, ticks: 0,
+    seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
 
     /** One simulation step. `intent` is what the player (or a bot) asked for. */
     tick(dt, intent = idleIntent()) {
@@ -184,6 +209,40 @@ export function createWorld(opts = {}) {
       clock.tick(dt);
       stepPlayer(player, intent, terrain, obstacles, dt);
       advanceGait(player, dt);
+
+      // The blade is a separate machine from the legs, and it is the one with
+      // the frame counts. Movement is locked while a swing is out, which is the
+      // whole meaning of commitment.
+      const f = player.fighter;
+      f.facing = player.yaw;
+      const swinging = f.state === S.WINDUP || f.state === S.ACTIVE || f.state === S.STAGGER;
+      if (swinging) { player.vel[0] *= 0.25; player.vel[2] *= 0.25; }
+      stepFighter(f, intent, Math.random);
+
+      for (const b of beasts) {
+        stepBeast(b, player, terrain, dt);
+        if (isStriking(b)) resolveStrike(b, f, Math.random, meleeDamage);
+      }
+      if (isStriking(f)) {
+        for (const b of beasts) {
+          const hit = resolveStrike(f, b, Math.random, meleeDamage);
+          if (hit && b.state === S.DEAD && !b.counted) {
+            b.counted = true;
+            player.xp += b.def.xp;
+            player.level = levelForXp(player.xp);
+          }
+        }
+      }
+
+      // Knockback moved bodies after the ground was resolved, so everything
+      // that got shoved has to be put back on the world: the character-never-
+      // falls-through test caught the player standing four centimetres inside a
+      // hillside for a tick after a wolf hit him.
+      resolveObstacles(player, obstacles);
+      const ground = terrain.heightAt(player.pos[0], player.pos[2]);
+      if (player.pos[1] < ground) { player.pos[1] = ground; player.onGround = true; }
+      for (const b of beasts) b.pos[1] = terrain.heightAt(b.pos[0], b.pos[2]);
+
       for (const p of people) stepPerson(p, terrain, dt);
       stepCamera(camera, player, terrain, obstacles, dt);
       return this;
@@ -254,6 +313,10 @@ export function createWorld(opts = {}) {
       for (const b of staticBoxes) boxes.push(b);
       poseHumanoid(playerParts, player);
       for (const part of playerParts) boxes.push(part);
+      for (let i = 0; i < beasts.length; i++) {
+        poseBeast(beastParts[i], beasts[i]);
+        for (const part of beastParts[i]) boxes.push(part);
+      }
       for (let i = 0; i < people.length; i++) {
         poseHumanoid(peopleParts[i], people[i]);
         for (const part of peopleParts[i]) boxes.push(part);

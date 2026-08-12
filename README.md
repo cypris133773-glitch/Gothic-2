@@ -47,6 +47,8 @@ What exists, and the command that proves it:
 | Characters | A twenty-two part jointed humanoid — plate, tabard, pauldrons, sword — posed by a walk cycle whose phase follows distance, not time, so feet do not skate. Four kits: knight, guard, villager, smith | `npm run shot` |
 | Town | Nine half-timbered houses from a grammar (stone base, jettied upper floor, timber lattice, 49° gabled roof, doors and windows), a well, market stalls, a cobbled square the terrain flattens for | `npm run shot` |
 | People | Six townsfolk, three of them walking routes with a pause and a turn at each end | `npm run play` |
+| Combat | The §6.2 state machine in ticks: wind-up, active, recovery, a nine-tick parry window, poise, stagger with an immunity window, knockback, combos you earn by connecting, and no way out of a swing you started | `npm test`, `npm run play` |
+| Beasts | Wolves and boar out past the fields, never in town; one decision every 0.4 s, a visible tell before the lunge, and a body that drops and reaches while it winds up | `npm test` |
 | Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
 | Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
@@ -99,6 +101,24 @@ nothing); every assertion reads simulation state instead. Eighteen checks: the
 character walks, stops, turns without pointer lock, strafes without turning,
 sneaks slower than it runs, jumps and lands, and the camera stays behind it and
 out of the hillside.
+
+## The duel harness
+
+`npm test` runs 200 headless duels between two policies — one that holds the
+attack button, one that spaces, baits and parries — and fails if the second does
+not win at least 80% of them at every skill level. It is the brief's own
+assertion (§13.2) and it is the reason three design decisions exist, each of
+which was found by watching the harness rather than by playing:
+
+- **A whiffed swing recovers 70% slower than a landed one.** Without it, flailing
+  costs nothing but time the flailer meant to spend swinging anyway.
+- **A combo has to be earned by connecting.** Chaining off a miss is free uptime.
+- **A stagger grants brief immunity to being staggered again.** Without it, two
+  landed hits break poise, the stagger is shorter than a swing cycle, and the
+  aggressor's next blade lands before the victim can act — for ever.
+
+Before those three, hold-the-button beat space-and-parry at every skill level.
+After them the spacer wins 80–100%.
 
 ## The frame-time probe
 

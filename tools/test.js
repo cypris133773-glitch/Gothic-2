@@ -17,6 +17,11 @@ import { createTerrain } from '../src/world/terrain.js';
 import { createWorld, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED } from '../src/game/player.js';
+import {
+  S, WEAPONS, createFighter, stepFighter, resolveStrike, comboLimit,
+  PARRY_TICKS, PARRY_STAGGER, STAGGER_TICKS, MIN_TELEGRAPH, WHIFF_RECOVERY,
+} from '../src/game/combat.js';
+import { duelSeries } from '../src/game/duel.js';
 
 let passed = 0;
 const failures = [];
@@ -600,6 +605,226 @@ check('the scene the renderer reads has terrain, props and a character in it', (
     assert(Number.isFinite(chunk.verts[i]), `vertex component ${i} is ${chunk.verts[i]}`);
   }
   assert(built.ms < 400, `building the world's terrain took ${built.ms} ms`);
+});
+
+// --- combat -------------------------------------------------------------------
+
+const noIntent = { attack: false, block: false };
+const swing = { attack: true, block: false };
+const rngOne = () => 0.999;              // never crits
+const rngZero = () => 0;                 // always crits
+
+/** Drive a fighter for n ticks with a fixed intent. */
+function run(f, n, intent = noIntent, rng = rngOne) {
+  for (let i = 0; i < n; i++) stepFighter(f, intent, rng);
+  return f;
+}
+
+check('a swing spends exactly the frames the weapon says', () => {
+  for (const [name, w] of Object.entries(WEAPONS)) {
+    const f = createFighter({ weapon: name });
+    stepFighter(f, swing, rngOne);
+    eq(f.state, S.WINDUP, `${name} enters wind-up`);
+    run(f, w.windup - 1, swing);
+    eq(f.state, S.WINDUP, `${name} is still winding up on the last tick`);
+    stepFighter(f, noIntent, rngOne);
+    eq(f.state, S.ACTIVE, `${name} goes live after ${w.windup} ticks`);
+    run(f, w.active - 1, noIntent);
+    eq(f.state, S.ACTIVE, `${name} blade is live for ${w.active} ticks`);
+    stepFighter(f, noIntent, rngOne);
+    eq(f.state, S.RECOVER, `${name} recovers after the active frames`);
+  }
+});
+
+check('a swing cannot be cancelled by anything', () => {
+  const f = createFighter();
+  run(f, WEAPONS.oneHanded.windup + 1, swing);
+  eq(f.state, S.ACTIVE, 'the blade is live');
+  // Every intent a player could possibly send, on the frame they would panic.
+  for (const intent of [{ attack: false, block: true }, { attack: true, block: true }, noIntent]) {
+    const g = createFighter();
+    run(g, WEAPONS.oneHanded.windup + 1, swing);
+    stepFighter(g, intent, rngOne);
+    assert(g.state === S.ACTIVE || g.state === S.RECOVER,
+      `blocking mid-swing escaped into ${Object.keys(S).find((k) => S[k] === g.state)}`);
+  }
+});
+
+check('a missed swing takes longer to recover from than a landed one', () => {
+  const miss = createFighter();
+  run(miss, WEAPONS.oneHanded.windup + WEAPONS.oneHanded.active + 1, swing);
+  eq(miss.state, S.RECOVER, 'recovering');
+  const missTicks = miss.t;
+  const hit = createFighter();
+  hit.landed = true;
+  run(hit, WEAPONS.oneHanded.windup + WEAPONS.oneHanded.active, swing);
+  hit.landed = true;                     // it connected during the active frames
+  stepFighter(hit, noIntent, rngOne);
+  assert(missTicks > hit.t, `a whiff recovers in ${missTicks} ticks, a hit in ${hit.t}`);
+  near(missTicks / WEAPONS.oneHanded.recover, WHIFF_RECOVERY, 0.12, 'whiff penalty');
+});
+
+check('a combo has to be earned by connecting', () => {
+  const w = WEAPONS.oneHanded;
+  const f = createFighter({ skill: 45 });
+  run(f, w.windup + w.active + w.comboFrom + 1, swing);   // in the combo window, whiffed
+  eq(f.state, S.RECOVER, 'still recovering after a whiff');
+  eq(f.combo, 0, 'a whiff cannot be chained');
+
+  const g = createFighter({ skill: 45 });
+  run(g, w.windup + w.active, swing);
+  g.landed = true;
+  run(g, w.comboFrom + 1, swing);
+  eq(g.combo, 1, 'a landed hit chains');
+});
+
+check('combo length follows weapon skill', () => {
+  eq(comboLimit(createFighter({ skill: 5 })), 0, 'untrained');
+  eq(comboLimit(createFighter({ skill: 10 })), 1, 'rookie');
+  eq(comboLimit(createFighter({ skill: 30 })), 2, 'trained');
+  eq(comboLimit(createFighter({ skill: 60 })), 3, 'master');
+});
+
+check('a parry staggers the attacker and costs no health', () => {
+  const att = createFighter({ pos: [0, 0, 0] });
+  const def = createFighter({ pos: [0, 0, 1.2] });
+  att.facing = 0; def.facing = Math.PI;
+  run(att, WEAPONS.oneHanded.windup + 1, swing);
+  eq(att.state, S.ACTIVE, 'the blade is live');
+  stepFighter(def, { attack: false, block: true }, rngOne);
+  eq(def.state, S.PARRY, 'the window is open');
+  const r = resolveStrike(att, def, rngZero, meleeDamage);
+  assert(r && r.parried, 'the strike was not parried');
+  eq(def.hp, def.maxHp, 'a parry costs no health');
+  eq(att.state, S.STAGGER, 'the attacker is staggered');
+  eq(att.t, PARRY_STAGGER, 'for the documented number of ticks');
+});
+
+check('a guard absorbs but does not erase', () => {
+  const att = createFighter({ pos: [0, 0, 0] });
+  const def = createFighter({ pos: [0, 0, 1.2] });
+  att.facing = 0; def.facing = Math.PI;
+  run(def, PARRY_TICKS + 1, { attack: false, block: true });
+  eq(def.state, S.BLOCK, 'the parry window decayed into a guard');
+  run(att, WEAPONS.oneHanded.windup + 1, swing);
+  const r = resolveStrike(att, def, rngZero, meleeDamage);
+  assert(r.blocked, 'the hit was not blocked');
+  assert(r.damage > 0, 'a guard should not erase damage');
+  assert(def.hp < def.maxHp, 'blocking took no damage at all');
+});
+
+check('nobody can be stagger-locked', () => {
+  // Land ten hits back to back and count how many of them stagger. Without the
+  // immunity window this was every second hit, for ever, which is how "hold the
+  // attack button" beat every other strategy in the duel harness.
+  const att = createFighter({ pos: [0, 0, 0] });
+  const def = createFighter({ pos: [0, 0, 1.0], hp: 100000 });
+  att.facing = 0; def.facing = Math.PI;
+  let staggers = 0;
+  for (let i = 0; i < 10; i++) {
+    att.state = S.ACTIVE; att.t = 1; att.hitThisSwing.clear();
+    def.pos[2] = 1.0;                    // step back into reach after the knockback
+    const before = def.state;
+    resolveStrike(att, def, rngOne, meleeDamage);
+    if (def.state === S.STAGGER && before !== S.STAGGER) staggers++;
+    run(def, STAGGER_TICKS + 1, noIntent);
+  }
+  assert(staggers <= 3, `${staggers} staggers out of ten consecutive hits is a lock`);
+  assert(staggers >= 1, 'poise never broke at all, which is the opposite problem');
+});
+
+check('a landed hit makes space', () => {
+  const att = createFighter({ pos: [0, 0, 0] });
+  const def = createFighter({ pos: [0, 0, 1.0] });
+  att.facing = 0; def.facing = Math.PI;
+  att.state = S.ACTIVE; att.t = 1;
+  resolveStrike(att, def, rngOne, meleeDamage);
+  assert(def.pos[2] > 1.2, `the target was not pushed back (${def.pos[2].toFixed(2)} m)`);
+});
+
+check('every creature attack telegraphs', () => {
+  // The rule is about what the player has to read, so it binds the creature
+  // weapons. A player's own dagger is allowed to be faster than they can react
+  // to: they know when they pressed the button.
+  for (const name of ['claws']) {
+    assert(WEAPONS[name].windup >= MIN_TELEGRAPH,
+      `${name} winds up in ${WEAPONS[name].windup} ticks, under the ${MIN_TELEGRAPH}-tick floor`);
+  }
+});
+
+check('spacing and parrying beats holding the attack button', () => {
+  // The brief's assertion (§13.2), and the reason three separate design
+  // decisions exist: whiff recovery, earned combos, and stagger immunity.
+  for (const skill of [10, 45, 75]) {
+    const r = duelSeries(200, { skill });
+    const rate = r.spacer / r.trials;
+    assert(rate >= 0.8, `at ${skill}% skill the spacer won ${(rate * 100).toFixed(0)}% of 200 duels`);
+  }
+});
+
+check('no skill level turns the fight into a damage race', () => {
+  for (const skill of [5, 30, 60, 90]) {
+    const r = duelSeries(120, { skill });
+    const rate = r.spacer / r.trials;
+    assert(rate >= 0.7, `at ${skill}% skill the spacer won only ${(rate * 100).toFixed(0)}%`);
+    assert(r.nobody === 0, `${r.nobody} duels at ${skill}% never ended`);
+  }
+});
+
+// --- the loop, played by a bot ------------------------------------------------
+
+/**
+ * A crude hunter: face the nearest living beast, close, swing. It is the
+ * simplest policy a player could have, and what it is for is not balance —
+ * it is proving that the whole loop closes. Walk, find, fight, kill, earn.
+ */
+function hunt(world, seconds = 240) {
+  const intent = idleIntent();
+  for (let t = 0; t < 60 * seconds; t++) {
+    const near = world.beasts.filter((b) => b.state !== S.DEAD)
+      .map((b) => ({ b, d: Math.hypot(b.pos[0] - world.player.pos[0], b.pos[2] - world.player.pos[2]) }))
+      .sort((p, q) => p.d - q.d)[0];
+    intent.forward = 1; intent.attack = false; intent.turn = 0;
+    if (near) {
+      const want = Math.atan2(near.b.pos[0] - world.player.pos[0], near.b.pos[2] - world.player.pos[2]);
+      let d = want - world.player.yaw;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      intent.turn = Math.max(-3, Math.min(3, d * 4));
+      if (near.d < 1.8) { intent.forward = 0; intent.attack = true; }
+    }
+    world.tick(1 / 60, intent);
+    if (world.player.fighter.hp <= 0) return { died: true, at: t / 60 };
+  }
+  return { died: false, at: seconds };
+}
+
+check('the loop closes: a bot can walk out, fight, and earn from it', () => {
+  const w = createWorld({ seed: 3, props: 120, beasts: 7 });
+  const out = hunt(w);
+  const alive = w.beasts.filter((b) => b.state !== S.DEAD).length;
+  assert(!out.died || alive < 7, `the bot died at ${out.at.toFixed(0)} s without killing anything`);
+  assert(w.player.fighter.hits > 0, 'the bot never landed a blow');
+  if (alive < 7) assert(w.player.xp > 0, 'killing a beast earned no experience');
+});
+
+check('the woods are dangerous', () => {
+  // A bot that walks into a pack and holds the attack button should not stroll
+  // out unhurt. If this ever passes trivially, the creatures have stopped
+  // mattering and the road is no longer worth staying on (§4, P2).
+  const w = createWorld({ seed: 3, props: 120, beasts: 7 });
+  hunt(w, 240);
+  const f = w.player.fighter;
+  assert(f.hp < f.maxHp * 0.75,
+    `the bot cleared the wood at ${f.hp}/${f.maxHp} health — nothing out there is a threat`);
+});
+
+check('nothing is placed on the market square', () => {
+  const w = createWorld({ seed: 5, beasts: 9, props: 40 });
+  for (const b of w.beasts) {
+    const d = Math.hypot(b.pos[0], b.pos[2]);
+    assert(d > 25, `a ${b.kind} spawned ${d.toFixed(1)} m from the well`);
+  }
 });
 
 // --- report ------------------------------------------------------------------

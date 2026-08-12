@@ -36,7 +36,8 @@ What exists, and the command that proves it:
 | --- | --- | --- |
 | Capability gate | WebGPU / WebGL2 / audio / storage / workers / pointer lock, each with a real failure path and a readable refusal page | `npm run play` |
 | Renderer | WebGL2 behind a device interface, ACES tonemapping, hemisphere ambient, sun and moon key light, aerial-perspective fog, shader compilation that cannot fail silently | `npm run shot` |
-| Terrain | Seeded heightfield with authored control curves — a settlement pad and a wandering road that bend the noise rather than sit on it — nine chunks, slope- and altitude-blended colour, rule-based scatter | `npm test`, `npm run shot` |
+| Terrain | Seeded heightfield with authored control curves — a settlement pad and a wandering road that bend the noise rather than sit on it — slope- and altitude-blended colour, rule-based scatter | `npm test`, `npm run shot` |
+| Streaming | 576 m of ground around the player in 64 m chunks, four levels of detail by ring, skirts over the seams, deep water never built, rebuilt only when the player crosses a chunk boundary | `npm test`, `npm run shot -- --vista` |
 | Traversal | Capsule character with mass, acceleration, friction, gravity, jump, sneak, slope sliding, circle-versus-circle obstacle resolution | `npm run play` |
 | Camera | Spring arm that pulls in instantly and eases out, never enters terrain or a tree, leads the character when they move | `npm test`, `npm run play` |
 | Loop | Fixed 60 Hz simulation, rendering decoupled, catch-up clamped and capped, `?off=` switches, `F3` overlay with frame percentiles | `npm run perf` |
@@ -50,9 +51,15 @@ What exists, and the command that proves it:
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
 | Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
 
+Two preview framings exist alongside the four times of day:
+`npm run shot -- --lineup` is a character sheet of every kit, and
+`npm run shot -- --vista` looks back at the town from a ridge, which is the
+framing that shows whether the distance holds up.
+
 Next is **M3** (the worldgen tool, the in-browser placement editor, baked nav
-data), then the rest of **M4/M5**: LOD and streaming so the town is not the
-whole world, and real interiors. The milestone table is §14 of the brief.
+data), then the rest of **M4/M5**: real interiors and wall collision — a house
+is still one keep-out circle, which is the most obvious remaining lie in the
+world. The milestone table is §14 of the brief.
 
 Two things are tied to the quality tier: shadows and material detail. Both are
 nearly free on a GPU and both are expensive on a software rasteriser — one

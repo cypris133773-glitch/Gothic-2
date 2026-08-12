@@ -14,7 +14,7 @@
 import { makeRng, hash } from '../core/rng.js';
 import { MAT } from '../assets/texgen.js';
 
-export const TERRAIN_SIZE = 256;      // metres across, centred on the origin
+export const TERRAIN_SIZE = 512;      // metres across, centred on the origin
 export const SEA_LEVEL = 0;           // y = 0 is the waterline, everywhere
 const HALF = TERRAIN_SIZE / 2;
 
@@ -104,57 +104,93 @@ export function createTerrain(seed = 1) {
  * has been built rather than pretending at a clipmap that has not.
  */
 export function buildChunk(terrain, cx, cz, chunkSize, res) {
-  const verts = new Float32Array((res + 1) * (res + 1) * 11);  // pos, normal, colour, weights
-  const index = new Uint32Array(res * res * 6);
+  // (res + 1)² grid, plus a skirt of one quad around the rim.
+  //
+  // The skirt is what makes level of detail possible at all. Two neighbouring
+  // chunks at different resolutions sample the same height function at
+  // different spacings, so their shared edge does not line up and daylight
+  // shows through the crack. A vertical curtain hanging a couple of metres
+  // below each chunk's rim covers it, costs one ring of quads, and is invisible
+  // because it is only ever seen edge-on through a gap that is a pixel wide.
+  const n = res + 1;
+  const skirtVerts = n * 4;
+  const verts = new Float32Array((n * n + skirtVerts) * 11);   // pos3, normal3, colour3, weights2
+  const index = new Uint32Array((res * res * 6) + (res * 4 * 6));
   const step = chunkSize / res;
-  const n = new Float32Array(3);
+  const nrm = new Float32Array(3);
   let v = 0;
-  for (let j = 0; j <= res; j++) {
-    for (let i = 0; i <= res; i++) {
+
+  const writeVertex = (x, z, y, forceDown) => {
+    terrain.normalAt(nrm, x, z);
+    verts[v++] = x; verts[v++] = y; verts[v++] = z;
+    // A skirt vertex keeps its rim's normal so the curtain shades like the
+    // ground it hangs from rather than like a wall.
+    verts[v++] = nrm[0]; verts[v++] = forceDown ? nrm[1] : nrm[1]; verts[v++] = nrm[2];
+    const slope = Math.acos(Math.min(1, nrm[1]));
+    const rock = smooth01((slope - 0.55) / 0.35);
+    const shore = 1 - smooth01((y - SEA_LEVEL) / 1.1);
+    const gr = [0.13, 0.18, 0.08], rk = [0.22, 0.21, 0.19], sh = [0.30, 0.28, 0.22];
+    const paved = smooth01((terrain.padFactor(x, z) - 0.45) / 0.35);
+    const grain = 0.86 + fbm(1, x * 2.7, z * 2.7, 2) * 0.34;
+    const cob = [0.17 * grain, 0.163 * grain, 0.152 * grain];
+    for (let c = 0; c < 3; c++) {
+      const base = gr[c] * (1 - rock) + rk[c] * rock;
+      const land = base * (1 - shore) + sh[c] * shore;
+      verts[v++] = land * (1 - paved) + cob[c] * paved;
+    }
+    verts[v++] = rock;
+    verts[v++] = paved;
+  };
+
+  for (let j = 0; j < n; j++) {
+    for (let i = 0; i < n; i++) {
       const x = cx + i * step, z = cz + j * step;
-      const y = terrain.heightAt(x, z);
-      terrain.normalAt(n, x, z);
-      verts[v++] = x; verts[v++] = y; verts[v++] = z;
-      verts[v++] = n[0]; verts[v++] = n[1]; verts[v++] = n[2];
-      // Colour by slope and altitude: grass on the flat, rock where it is
-      // steep, and a paler band down at the shore. This is the whole material
-      // system until M4, and it is enough for the land to read as land.
-      const slope = Math.acos(Math.min(1, n[1]));
-      const rock = smooth01((slope - 0.55) / 0.35);
-      // The sand band is keyed to sea level and is narrow. The first version
-      // faded it out over the first 2.6 m of altitude, which put the whole
-      // settlement pad — which sits at 1.2 m — under beach sand, and the render
-      // gate photographed a village built on a salt flat.
-      const shore = 1 - smooth01((y - SEA_LEVEL) / 1.1);
-      const gr = [0.13, 0.18, 0.08], rk = [0.22, 0.21, 0.19], sh = [0.30, 0.28, 0.22];
-      // Where the town flattens the ground, the ground is paved. The cobbles
-      // vary per-vertex so the square is not a flat grey field, which is most
-      // of what sells a paved surface without a texture.
-      const paved = smooth01((terrain.padFactor(x, z) - 0.45) / 0.35);
-      const grain = 0.86 + fbm(1, x * 2.7, z * 2.7, 2) * 0.34;
-      const cob = [0.17 * grain, 0.163 * grain, 0.152 * grain];
-      for (let c = 0; c < 3; c++) {
-        const base = gr[c] * (1 - rock) + rk[c] * rock;
-        const land = base * (1 - shore) + sh[c] * shore;
-        verts[v++] = land * (1 - paved) + cob[c] * paved;
-      }
-      // Which detail material this vertex wears. The colour blends smoothly and
-      // the pattern switches at the halfway point, which at this detail
-      // strength is far less visible than the three texture fetches a real
-      // blend would cost on every pixel of the ground.
-      verts[v++] = rock;
-      verts[v++] = paved;
+      writeVertex(x, z, terrain.heightAt(x, z), false);
     }
   }
+
   let k = 0;
   for (let j = 0; j < res; j++) {
     for (let i = 0; i < res; i++) {
-      const a = j * (res + 1) + i, b = a + 1, c = a + res + 1, d = c + 1;
+      const a = j * n + i, b = a + 1, c = a + n, d = c + 1;
       index[k++] = a; index[k++] = c; index[k++] = b;
       index[k++] = b; index[k++] = c; index[k++] = d;
     }
   }
-  return { verts, index };
+
+  // The four skirt strips, in the order the loop below expects them.
+  const DROP = 3.5;
+  const edges = [
+    { fixed: 'j', at: 0, flip: true },
+    { fixed: 'j', at: res, flip: false },
+    { fixed: 'i', at: 0, flip: false },
+    { fixed: 'i', at: res, flip: true },
+  ];
+  for (const edge of edges) {
+    const first = v / 11;
+    for (let t = 0; t < n; t++) {
+      const i = edge.fixed === 'i' ? edge.at : t;
+      const j = edge.fixed === 'j' ? edge.at : t;
+      const x = cx + i * step, z = cz + j * step;
+      writeVertex(x, z, terrain.heightAt(x, z) - DROP, true);
+    }
+    for (let t = 0; t < res; t++) {
+      const i = edge.fixed === 'i' ? edge.at : t;
+      const j = edge.fixed === 'j' ? edge.at : t;
+      const top = j * n + i;
+      const topNext = edge.fixed === 'i' ? top + n : top + 1;
+      const bot = first + t, botNext = bot + 1;
+      if (edge.flip) {
+        index[k++] = top; index[k++] = bot; index[k++] = topNext;
+        index[k++] = topNext; index[k++] = bot; index[k++] = botNext;
+      } else {
+        index[k++] = top; index[k++] = topNext; index[k++] = bot;
+        index[k++] = topNext; index[k++] = botNext; index[k++] = bot;
+      }
+    }
+  }
+
+  return { verts, index: index.subarray(0, k) };
 }
 
 /**

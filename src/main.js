@@ -50,8 +50,22 @@ async function boot() {
     hour: params.has('time') ? Number(params.get('time')) : 9,
     props: params.has('props') ? Number(params.get('props')) : undefined,
     lineup: params.has('lineup'),
+    start: params.has('start') ? params.get('start').split(',').map(Number) : undefined,
+    yaw: params.has('yaw') ? Number(params.get('yaw')) : undefined,
   });
-  device.setTerrain(world.chunks());
+  // Terrain streaming: rebuild the meshes when the player crosses into a new
+  // chunk, and never otherwise. It is a single synchronous rebuild for now,
+  // which is a real hitch of a few milliseconds on a boundary — the budgeted,
+  // worker-decoded version is §9.7's job and is written down in
+  // docs/OPEN-QUESTIONS.md rather than pretended away.
+  let terrainCell = world.terrainCell();
+  let terrainMs = 0;
+  const rebuildTerrain = () => {
+    const built = world.chunks();
+    terrainMs = built.ms;
+    device.setTerrain(built);
+  };
+  rebuildTerrain();
 
   const input = createInput(canvas);
   const overlay = createOverlay(document.getElementById('overlay'));
@@ -158,6 +172,9 @@ async function boot() {
       ticks++;
     }
 
+    const cell = world.terrainCell();
+    if (cell !== terrainCell) { terrainCell = cell; rebuildTerrain(); }
+
     if (lineupCam) frameLineup();
     const [w, h] = sizeFor();
     device.resize(w, h);
@@ -178,6 +195,7 @@ async function boot() {
         pos: `${pl.pos[0].toFixed(1)} ${pl.pos[1].toFixed(1)} ${pl.pos[2].toFixed(1)}  ${pl.speed.toFixed(1)} m/s`,
         state: `${pl.onGround ? 'ground' : 'air'}${pl.sneaking ? ' · sneaking' : ''}  cam ${world.camera.dist.toFixed(1)} m`,
         clock: `day ${world.clock.day} ${world.clock.hhmm}${world.clock.isNight ? ' (night)' : ''}`,
+        terrain: `cell ${terrainCell}  rebuilt in ${terrainMs} ms`,
         seed: String(world.seed),
       });
     }

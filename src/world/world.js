@@ -17,7 +17,18 @@ import { idleIntent } from '../core/input.js';
 import { makeRng } from '../core/rng.js';
 
 export const CHUNK = 64;         // metres per terrain chunk
-export const CHUNK_RES = 48;     // vertices per side; ~1.3 m between samples
+// Vertices per side by ring: dense underfoot, coarse at the horizon. The last
+// entry covers every ring beyond it.
+export const LOD_RES = [40, 24, 14, 8];
+export const RADIUS = 4;         // 9×9 chunks — 576 m of ground around the player
+
+/** True when a patch is entirely deep water and not worth building. */
+function deepWater(terrain, x, z) {
+  for (const [dx, dz] of [[0, 0], [CHUNK, 0], [0, CHUNK], [CHUNK, CHUNK], [CHUNK / 2, CHUNK / 2]]) {
+    if (terrain.heightAt(x + dx, z + dz) > -6) return false;
+  }
+  return true;
+}
 
 /** The town: houses around a square, a well in the middle, two market stalls. */
 function buildTown(terrain, seed) {
@@ -131,8 +142,11 @@ export function createWorld(opts = {}) {
 
   // The player starts on the square, which the terrain generator flattens, so a
   // fresh game never begins halfway up a cliff.
-  const player = createPlayer(0, opts.lineup ? -30 : 8, terrain);
-  player.yaw = Math.PI;                       // looking at the town
+  // `start` puts the player anywhere, which is how the gate photographs a
+  // vista from a ridge and how a bug report says "stand here".
+  const start = opts.start || (opts.lineup ? [0, -30] : [0, 8]);
+  const player = createPlayer(start[0], start[1], terrain);
+  player.yaw = opts.yaw ?? Math.PI;           // by default, looking at the town
   player.kit = KITS.knight;
   player.phase = 0;
   const camera = createCamera();
@@ -175,14 +189,47 @@ export function createWorld(opts = {}) {
       return this;
     },
 
-    /** Terrain meshes for the renderer. Nine chunks; LOD and streaming at M4. */
-    chunks() {
-      const built = [];
-      for (let j = -1; j <= 1; j++) {
-        for (let i = -1; i <= 1; i++) {
-          built.push(buildChunk(terrain, i * CHUNK - CHUNK / 2, j * CHUNK - CHUNK / 2, CHUNK, CHUNK_RES));
+    /**
+     * The terrain cell the player stands in. The renderer rebuilds its meshes
+     * when this changes and not otherwise, which is the whole of streaming.
+     */
+    terrainCell() {
+      return `${Math.floor(player.pos[0] / CHUNK)},${Math.floor(player.pos[2] / CHUNK)}`;
+    },
+
+    /**
+     * Which patches of ground to build, around the player.
+     *
+     * Every chunk is the same 64 m square and only the vertex count changes
+     * with distance. That is a deliberate simplification of the usual clipmap:
+     * rings of *different-sized* chunks have to be aligned to each other's
+     * grids or they overlap and z-fight, and the alignment arithmetic is where
+     * that technique goes wrong. One grid cannot misalign with itself, the
+     * skirts cover the resolution seams, and the far ring is cheap enough that
+     * the extra chunks cost less than the bug would have.
+     */
+    chunkPlan(px = player.pos[0], pz = player.pos[2]) {
+      const cx = Math.floor(px / CHUNK), cz = Math.floor(pz / CHUNK);
+      const plan = [];
+      for (let j = -RADIUS; j <= RADIUS; j++) {
+        for (let i = -RADIUS; i <= RADIUS; i++) {
+          const ring = Math.max(Math.abs(i), Math.abs(j));
+          const x = (cx + i) * CHUNK, z = (cz + j) * CHUNK;
+          // Nothing is built for a patch that is entirely deep water: the
+          // island falls away to the sea, and past that there is nothing to
+          // look at and no reason to pay for it.
+          if (deepWater(terrain, x, z)) continue;
+          plan.push({ x, z, size: CHUNK, res: LOD_RES[Math.min(ring, LOD_RES.length - 1)] });
         }
       }
+      return plan;
+    },
+
+    /** Build the meshes for a plan. Returns them with the time it took. */
+    chunks(plan = this.chunkPlan()) {
+      const t0 = Date.now();
+      const built = plan.map((c) => buildChunk(terrain, c.x, c.z, c.size, c.res));
+      built.ms = Date.now() - t0;
       return built;
     },
 

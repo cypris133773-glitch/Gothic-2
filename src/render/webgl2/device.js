@@ -205,8 +205,12 @@ void main() {
 
   // Aerial perspective, cheaply: distance fades toward the sky, which is what
   // gives a landscape depth and stops far terrain reading as a painted flat.
-  float fog = 1.0 - exp(-dist * 0.0052);
-  lit = mix(lit, uFogColor, fog * 0.88);
+  // Aerial perspective. Half the previous strength: at 0.0052 per metre a tree
+  // a hundred and fifty metres away was already half sky, which reads as haze
+  // on a clear morning and flattens exactly the distance the LOD rings were
+  // added to show.
+  float fog = 1.0 - exp(-dist * 0.0026);
+  lit = mix(lit, uFogColor, min(fog, 0.72));
 
   outColor = vec4(pow(aces(lit), vec3(1.0 / 2.2)), 1.0);
 }`;

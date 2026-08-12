@@ -14,7 +14,7 @@ import { makeRng, hash } from '../src/core/rng.js';
 import * as m from '../src/core/math.js';
 import { on, emit, off, listenerCount, clearAll } from '../src/core/events.js';
 import { createTerrain } from '../src/world/terrain.js';
-import { createWorld } from '../src/world/world.js';
+import { createWorld, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED } from '../src/game/player.js';
 
@@ -448,18 +448,100 @@ check('the simulation is deterministic from the seed', () => {
   for (let i = 0; i < a.length; i++) eq(a[i], b[i], `component ${i} diverged`);
 });
 
+// --- terrain streaming --------------------------------------------------------
+
+check('the plan covers the ground around the player and never twice', () => {
+  const w = createWorld({ seed: 4, props: 0, town: false, people: false });
+  const plan = w.chunkPlan();
+  const seen = new Set();
+  for (const c of plan) {
+    const key = `${c.x},${c.z}`;
+    assert(!seen.has(key), `two chunks at ${key} — they would z-fight`);
+    seen.add(key);
+    assert(c.size === CHUNK, 'every chunk is the same size, by design');
+    assert(LOD_RES.includes(c.res), `${c.res} is not one of the LOD resolutions`);
+  }
+  const side = RADIUS * 2 + 1;
+  assert(plan.length <= side * side, `plan has ${plan.length} chunks, more than the ${side}×${side} grid`);
+  assert(plan.length > side * side * 0.4, `plan has only ${plan.length} chunks — too much was culled`);
+});
+
+check('detail falls off with distance and not before', () => {
+  const w = createWorld({ seed: 4, props: 0, town: false, people: false });
+  const plan = w.chunkPlan(0, 0);
+  const at = (x, z) => plan.find((c) => c.x === x * CHUNK && c.z === z * CHUNK);
+  eq(at(0, 0).res, LOD_RES[0], 'the chunk under the player is the densest');
+  eq(at(1, 0).res, LOD_RES[1], 'one ring out');
+  eq(at(2, 0).res, LOD_RES[2], 'two rings out');
+  // The outermost ring is often absent entirely: past the island's coast a
+  // chunk is deep water and is not built. Whatever survives out there must be
+  // at the coarsest resolution.
+  for (const c of plan) {
+    const ring = Math.max(Math.abs(c.x / CHUNK), Math.abs(c.z / CHUNK));
+    if (ring >= LOD_RES.length - 1) eq(c.res, LOD_RES[LOD_RES.length - 1], `ring ${ring}`);
+  }
+});
+
+check('the terrain cell is exactly where the player is standing', () => {
+  // The real invariant, rather than "it changes after about twelve seconds" —
+  // the player starts eight metres from a boundary, so that version of the
+  // test was measuring the spawn point.
+  const w = createWorld({ seed: 4, props: 0, town: false, people: false });
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  let changes = 0, last = w.terrainCell();
+  for (let t = 0; t < 60 * 40; t++) {
+    w.tick(1 / 60, walk);
+    const expect = `${Math.floor(w.player.pos[0] / CHUNK)},${Math.floor(w.player.pos[2] / CHUNK)}`;
+    eq(w.terrainCell(), expect, `cell at tick ${t}`);
+    if (w.terrainCell() !== last) { changes++; last = w.terrainCell(); }
+  }
+  // Forty seconds of running covers a bit over 200 m, which is three or four
+  // boundaries. Far more than that would mean the cell is flickering on a
+  // boundary and the renderer is rebuilding the world every frame.
+  assert(changes >= 2 && changes <= 6, `${changes} rebuilds in forty seconds of running`);
+});
+
+check('every chunk has skirts and no NaN', () => {
+  const w = createWorld({ seed: 6, props: 0, town: false, people: false });
+  const plan = w.chunkPlan();
+  for (const c of plan.slice(0, 12)) {
+    const mesh = w.chunks([c])[0];
+    const n = c.res + 1;
+    // n² surface vertices plus one skirt row per edge.
+    eq(mesh.verts.length / 11, n * n + n * 4, `vertex count for a ${c.res}-res chunk`);
+    for (let i = 0; i < mesh.verts.length; i++) {
+      assert(Number.isFinite(mesh.verts[i]), `vertex component ${i} is ${mesh.verts[i]}`);
+    }
+    for (let i = 0; i < mesh.index.length; i++) {
+      assert(mesh.index[i] < mesh.verts.length / 11, `index ${i} points past the end`);
+    }
+  }
+});
+
+check('the skirt hangs below the ground it is attached to', () => {
+  const w = createWorld({ seed: 6, props: 0, town: false, people: false });
+  const c = w.chunkPlan()[0];
+  const mesh = w.chunks([c])[0];
+  const n = c.res + 1;
+  const y = (idx) => mesh.verts[idx * 11 + 1];
+  // The first skirt vertex sits under the first vertex of the j = 0 edge.
+  assert(y(n * n) < y(0) - 1, `skirt at ${y(n * n).toFixed(2)} is not below the rim at ${y(0).toFixed(2)}`);
+});
+
 check('the scene the renderer reads has terrain, props and a character in it', () => {
   const w = createWorld({ seed: 2, props: 50 });
   w.tick(1 / 60, idleIntent());
   const s = w.scene();
   assert(s.boxes.length >= 3, 'the scene has almost nothing in it');
-  assert(w.chunks().length === 9, 'nine chunks around the player');
-  const chunk = w.chunks()[4];
+  const built = w.chunks();
+  assert(built.length > 20, `only ${built.length} chunks around the player`);
+  const chunk = built[0];
   assert(chunk.verts.length > 0 && chunk.index.length > 0, 'the centre chunk is empty');
   // Every vertex must be finite, or the GPU draws nothing and says nothing.
   for (let i = 0; i < chunk.verts.length; i++) {
     assert(Number.isFinite(chunk.verts[i]), `vertex component ${i} is ${chunk.verts[i]}`);
   }
+  assert(built.ms < 400, `building the world's terrain took ${built.ms} ms`);
 });
 
 // --- report ------------------------------------------------------------------

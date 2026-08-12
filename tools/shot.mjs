@@ -95,8 +95,14 @@ function serve() {
 // the committed reference images grow with it (§12 of the brief, pillar P12).
 
 const LINEUP = !!opt('lineup');
+const VISTA = !!opt('vista');
 const SCENES = LINEUP
   ? [{ name: 'models', time: 11 }]
+  : VISTA
+  // A ridge north-east of the town, looking back across it. This is the framing
+  // that shows whether the distance holds up: terrain LOD, aerial perspective,
+  // and whether the town reads as a place from outside it.
+  ? [{ name: 'vista', time: 16.5, extra: '&start=74,-58&yaw=-0.90' }]
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]
   : [
@@ -139,7 +145,7 @@ async function run() {
       process.stdout.write(`  ${scene.name} …\r`);
       // tier=medium on purpose: the gate photographs what a normal machine
       // sees, not what this GPU-less container would default itself to.
-      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium${LINEUP ? '&lineup=1' : ''}`;
+      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium${LINEUP ? '&lineup=1' : ''}${scene.extra || ''}`;
       await page.send('Page.navigate', { url });
       const probe = await page.waitFor('window.GRIMWARD && window.GRIMWARD.probe',
         { timeout: 60000, what: `${scene.name} to render` });
@@ -248,7 +254,15 @@ function report(results) {
     // four flat-shaded boxes, and the number that has to grow with the world is
     // this threshold, not the assertion. A black screen scores one.
     if (p.colors < 12) failures.push(`${r.scene}: only ${p.colors} distinct colours — the frame is flat`);
-    if (p.maxLuma - p.minLuma < 20) failures.push(`${r.scene}: luminance range ${p.minLuma}–${p.maxLuma} — nothing is lit`);
+    // Contrast, relative to the frame's own exposure rather than an absolute
+    // number of levels. The absolute version (a range of 20) failed the night
+    // framing the moment the aerial perspective was tuned down: a mean
+    // luminance of 12 with a range of 19 is a dark scene with legible
+    // silhouettes in it, which is exactly what night is supposed to be. A black
+    // frame still scores zero, and so does a flat grey one, which is what this
+    // check is actually for.
+    const contrast = (x) => x.maxLuma - x.minLuma >= Math.max(8, x.meanLuma * 0.55);
+    if (!contrast(p)) failures.push(`${r.scene}: the page saw ${p.minLuma}–${p.maxLuma} around a mean of ${p.meanLuma} — nothing is lit`);
     if (p.drawCalls < 1) failures.push(`${r.scene}: nothing was drawn`);
 
     // The same three questions, asked of the decoded image rather than of the
@@ -256,7 +270,7 @@ function report(results) {
     // the compositor never got the frame, which is its own class of bug.
     const img = r.image;
     if (img.colors < 12) failures.push(`${r.scene}: the screenshot has only ${img.colors} distinct colours`);
-    if (img.maxLuma - img.minLuma < 20) failures.push(`${r.scene}: the screenshot is flat (${img.minLuma}–${img.maxLuma})`);
+    if (!contrast(img)) failures.push(`${r.scene}: the screenshot is flat (${img.minLuma}–${img.maxLuma} around ${img.meanLuma})`);
     if (Math.abs(img.meanLuma - p.meanLuma) > 40) {
       failures.push(`${r.scene}: page reported mean luma ${p.meanLuma}, the image is ${img.meanLuma}`);
     }

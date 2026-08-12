@@ -54,7 +54,9 @@ async function boot() {
     seed: Number(params.get('seed')) || 1,
     hour: params.has('time') ? Number(params.get('time')) : 9,
     props: params.has('props') ? Number(params.get('props')) : undefined,
-    lineup: params.has('lineup'),
+    lineup: params.has('lineup')
+      ? (params.get('lineup') ? params.get('lineup').split(',').filter(Boolean) : true)
+      : false,
     clutter: params.has('clutter')
       ? Number(params.get('clutter'))
       : ({ low: 0, medium: 1100, high: 2600, ultra: 4000 })[tier] ?? 1100,
@@ -378,9 +380,15 @@ async function boot() {
   const frameLineup = () => {
     const c = world.camera;
     const ground = world.people[0].pos[1];
-    c.pos[0] = 0.2; c.pos[1] = ground + 1.25; c.pos[2] = -5.0;
+    // Framed to the row, so a sheet of three suits is a close-up of three
+    // suits and a sheet of nine is not nine specks.
+    // A long lens rather than a wide one: 40° and stand further back. A wide
+    // lens close in barrels the outer figures and makes a nine-suit sheet look
+    // like a fisheye photo of a police line-up.
+    const n = world.people.length;
+    c.pos[0] = 0.12; c.pos[1] = ground + 1.05; c.pos[2] = -(2.2 + n * 0.72);
     c.target[0] = 0; c.target[1] = ground + 0.95; c.target[2] = 0;
-    c.fov = 46;
+    c.fov = 40;
   };
 
   /**

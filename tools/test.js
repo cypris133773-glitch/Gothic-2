@@ -17,6 +17,7 @@ import { createTerrain, PLACES, ROADS } from '../src/world/terrain.js';
 import { createWorld, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED, resolveObstacles } from '../src/game/player.js';
+import { KITS, poseHumanoid, kitForArmour } from '../src/game/rig.js';
 import {
   S, WEAPONS, createFighter, stepFighter, resolveStrike, comboLimit,
   PARRY_TICKS, PARRY_STAGGER, STAGGER_TICKS, MIN_TELEGRAPH, WHIFF_RECOVERY,
@@ -865,6 +866,56 @@ check('nothing is placed on the market square', () => {
     const d = Math.hypot(b.pos[0], b.pos[2]);
     assert(d > 25, `a ${b.kind} spawned ${d.toFixed(1)} m from the well`);
   }
+});
+
+// --- the wardrobe -------------------------------------------------------------
+
+check('every kit builds a whole person, and armour adds pieces to it', () => {
+  const state = { pos: new Float32Array([0, 0, 0]), yaw: 0, speed: 3.2, phase: 1.1 };
+  const counts = {};
+  for (const [name, kit] of Object.entries(KITS)) {
+    const out = [];
+    poseHumanoid(out, { ...state, kit });
+    counts[name] = out.length;
+    // A body is twenty-two parts before anything is worn.
+    assert(out.length >= 22, `${name} came out as ${out.length} parts — that is not a person`);
+    for (const part of out) {
+      assert(part.mat.length === 16, `${name} produced a part with no matrix`);
+      for (const c of part.albedo) {
+        assert(c >= 0 && c <= 1, `${name} has an albedo of ${c} — albedos are not screen colours`);
+        // Authored a stop and a half under the buildings, for the reason in
+        // src/game/rig.js: a person is boxes, and one face is always square to
+        // the sun. Anything above 0.45 photographs as a man in a bedsheet.
+        assert(c <= 0.45, `${name} has an albedo of ${c.toFixed(2)} and will render as paper`);
+      }
+    }
+  }
+  // A harness is meaningfully more model than a shirt, or the pieces are not
+  // doing anything.
+  assert(counts.watch > counts.rags + 15,
+    `mail is only ${counts.watch - counts.rags} parts more than rags`);
+  assert(counts.villager < counts.knight,
+    'a villager is built out of as many parts as a knight');
+});
+
+check('what the player wears is what the player looks like', () => {
+  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+  const parts = () => { const o = []; poseHumanoid(o, w.player); return o.length; };
+  const inRags = parts();
+  eq(w.inventory.armour, 'rags', 'a new character starts in what he arrived in');
+
+  w.character.guild = 'watch';
+  w.character.str = 30;
+  w.give('watch_mail');
+  assert(w.equip('watch_mail').ok, 'a sworn man of the Watch could not put on his own mail');
+  assert(parts() > inRags + 15, `the mail added only ${parts() - inRags} parts to the model`);
+  eq(w.player.fighter.armor, 48, 'and the numbers did not follow the pieces');
+
+  // Guild armour is a door, not a purchase (P3/P5).
+  const other = createWorld({ seed: 1, beasts: 0, props: 10 });
+  other.character.str = 30;
+  other.give('watch_mail');
+  assert(!other.equip('watch_mail').ok, 'a man sworn to nobody put on the Watch\'s mail');
 });
 
 // --- the map ------------------------------------------------------------------

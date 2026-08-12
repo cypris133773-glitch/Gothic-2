@@ -16,7 +16,7 @@ import {
 } from './buildings.js';
 import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
-import { poseHumanoid, advanceGait, KITS } from '../game/rig.js';
+import { poseHumanoid, advanceGait, KITS, kitForArmour } from '../game/rig.js';
 import { Clock, keyLightDirection, skyPalette } from '../core/time.js';
 import { idleIntent } from '../core/input.js';
 import { makeRng } from '../core/rng.js';
@@ -194,16 +194,31 @@ function buildOutlands(terrain, seed) {
 }
 
 /**
+ * Every suit of armour in the game, side by side, in the order you would
+ * acquire them — the whole wardrobe, because the wardrobe is what a change to
+ * the rig has to be checked against. `?lineup=watch,ember` picks a subset, which
+ * is how a close-up of three suits is taken without a second viewer.
+ */
+export const DEFAULT_LINEUP = [
+  'rags', 'leather', 'watch', 'ember', 'freeblade', 'knight', 'guard', 'smith', 'villager',
+];
+
+/**
  * A character sheet: every kit, side by side, on flat ground, facing the camera.
  *
  * It is a mode of the real world rather than a separate viewer — the same rig,
  * the same materials, the same lighting — so it cannot drift out of step with
  * what the game actually draws, which is the entire point of having one.
  */
-function makeLineup(terrain) {
-  const kits = ['knight', 'guard', 'smith', 'villager'];
+function makeLineup(terrain, which) {
+  // Filter first, then fall back. Doing it the other way round meant a query
+  // string naming no kit anyone recognises produced an empty row, and an empty
+  // row crashed the framing code with `people[0] is undefined` — a broken URL
+  // should give you the default sheet, not a blank page.
+  const asked = Array.isArray(which) ? which.filter((n) => KITS[n]) : [];
+  const kits = asked.length ? asked : DEFAULT_LINEUP;
   return kits.map((name, i) => {
-    const x = (i - (kits.length - 1) / 2) * 1.9;
+    const x = (i - (kits.length - 1) / 2) * 1.75;
     const z = 0;
     return {
       id: `kit_${name}`, kitName: name,
@@ -335,7 +350,10 @@ export function createWorld(opts = {}) {
   const start = opts.start || (opts.lineup ? [0, -30] : [0, 26]);
   const player = createPlayer(start[0], start[1], terrain);
   player.yaw = opts.yaw ?? Math.PI;           // by default, looking up the street
-  player.kit = KITS.knight;
+  // He starts in what he arrived in, which is rags. The knight kit is the
+  // character sheet's, not the player's — dressing the player in plate he has
+  // not earned is exactly the lie the whole gear system exists to avoid.
+  player.kit = KITS.rags;
   player.phase = 0;
   const camera = createCamera();
 
@@ -376,7 +394,7 @@ export function createWorld(opts = {}) {
   const town = (opts.town === false || opts.lineup)
     ? []
     : [...buildCity(terrain, seed), ...buildOutlands(terrain, seed)];
-  const people = opts.lineup ? makeLineup(terrain)
+  const people = opts.lineup ? makeLineup(terrain, opts.lineup)
     : opts.people === false ? [] : makePeople(terrain, seed);
 
   // Wolves, out past the fields. Nothing is placed on a road, on a pad or
@@ -651,13 +669,13 @@ export function createWorld(opts = {}) {
 
     equip(id) {
       const r = equip(inventory, character, id);
-      if (r.ok) { applyLoadout(inventory, character, player.fighter); world.log.push(`equipped ${r.item.name}`); }
+      if (r.ok) { world.reloadout(); world.log.push(`equipped ${r.item.name}`); }
       else world.log.push(r.why);
       return r;
     },
     unequip(slot) {
       unequip(inventory, slot);
-      applyLoadout(inventory, character, player.fighter);
+      world.reloadout();
       return { ok: true };
     },
     drink(id) {
@@ -697,7 +715,17 @@ export function createWorld(opts = {}) {
         traders.set(id, t);
       }
     },
-    reloadout() { applyLoadout(inventory, character, player.fighter); },
+    /**
+     * Put the loadout on: the numbers on the fighter, and the *pieces on the
+     * model*. Armour you cannot see is a number, and a number is not a reward —
+     * so equipping the Watch's mail has to change the man on screen, and it does
+     * it here, in the one place a change of gear passes through.
+     */
+    reloadout() {
+      applyLoadout(inventory, character, player.fighter);
+      player.kit = kitForArmour(inventory.armour);
+      return player.kit;
+    },
 
     /** A save is the seed plus everything that has changed since (§12.1). */
     snapshot() { return snapshot(world); },
@@ -796,7 +824,7 @@ export function createWorld(opts = {}) {
         // The world's flag set is what dialogue and loot read, so a skill
         // learned on the sheet has to appear there too.
         for (const f of character.flags) flags.add(f);
-        applyLoadout(inventory, character, player.fighter);
+        world.reloadout();
       }
       return r;
     },

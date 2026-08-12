@@ -7,7 +7,7 @@
 // object a keyboard produces, and it is the only way anyone will ever prove
 // that a world this size can be walked across and finished.
 
-import { createTerrain, buildChunk, scatter } from './terrain.js';
+import { createTerrain, buildChunk, scatter, clutter } from './terrain.js';
 import { buildHouse, buildWell, buildStall } from './buildings.js';
 import { createPlayer, stepPlayer, resolveObstacles, HEIGHT } from '../game/player.js';
 import { createCamera, stepCamera } from '../game/camera.js';
@@ -22,6 +22,8 @@ import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../g
 import { createDialogue } from '../game/dialogue.js';
 import { DIALOGUE, SPEAKERS } from '../data/dialogue.js';
 import { snapshot, restore } from '../core/save.js';
+
+const ticksToSeconds = (t) => t / 60;
 
 export const CHUNK = 64;         // metres per terrain chunk
 // Vertices per side by ring: dense underfoot, coarse at the horizon. The last
@@ -232,6 +234,16 @@ export function createWorld(opts = {}) {
   const boxes = [];
   const playerParts = [];
   const peopleParts = people.map(() => []);
+
+  // Ground clutter follows the player and is rebuilt when he leaves the patch
+  // it was scattered for — the same "only when you cross a boundary" rule the
+  // terrain streaming uses, for the same reason.
+  let clutterAt = [1e9, 1e9];
+  let ground = [];
+  // How much grass, by quality tier. It is the third thing that scales with the
+  // machine, after shadows and material detail, and for the same reason: nearly
+  // free on a GPU, the most expensive thing in the frame on a software one.
+  const clutterCount = opts.clutter === false ? 0 : (opts.clutter ?? 2600);
 
   const sunDir = new Float32Array(3);
   const shadowFocus = new Float32Array(3);
@@ -459,8 +471,18 @@ export function createWorld(opts = {}) {
       shadowFocus[1] = player.pos[1];
       shadowFocus[2] = player.pos[2];
 
+      if (Math.hypot(player.pos[0] - clutterAt[0], player.pos[2] - clutterAt[1]) > 14) {
+        clutterAt = [player.pos[0], player.pos[2]];
+        ground = clutterCount ? clutter(terrain, clutterAt, 30, clutterCount) : [];
+      }
+
+      // The wind field's clock. Seconds, not ticks, because the shader wants a
+      // continuous quantity and the simulation's tick count is not one.
+      scene.time = ticksToSeconds(this.ticks);
+
       boxes.length = 0;
       for (const b of staticBoxes) boxes.push(b);
+      for (const g of ground) boxes.push(g);
       poseHumanoid(playerParts, player);
       for (const part of playerParts) boxes.push(part);
       for (let i = 0; i < beasts.length; i++) {

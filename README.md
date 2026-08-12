@@ -56,6 +56,7 @@ What exists, and the command that proves it:
 | Saving | Deltas against the seed, not snapshots of the world: a played character is about 600 bytes. Versioned with a migration chain, IndexedDB with an in-memory fallback, and a corrupt save is a message rather than a broken game | `npm test`, `npm run play` |
 | Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
+| Ground cover | Grass tufts and stones scattered on a disc around the player, rebuilt when he walks out of the patch, swayed by a global wind field the shadow pass shares | `npm run shot -- --vista` |
 | Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
 
 Two preview framings exist alongside the four times of day:
@@ -67,11 +68,12 @@ Next is **M3** (the worldgen tool, the in-browser placement editor, baked nav
 data), then the rest of **M4/M5**: interiors you can walk into, and a
 skinned mesh for the characters. The milestone table is §14 of the brief.
 
-Two things are tied to the quality tier: shadows and material detail. Both are
+Three things are tied to the quality tier: shadows, material detail and ground
+cover. Both are
 nearly free on a GPU and both are expensive on a software rasteriser — one
 dependent texture fetch per pixel of a screen that is mostly ground — so `low`
-goes without them, and `?off=shadows` / `?off=textures` switch them off
-anywhere.
+goes without them, and `?off=shadows` / `?off=textures` / `?clutter=0` switch
+them off anywhere.
 
 
 

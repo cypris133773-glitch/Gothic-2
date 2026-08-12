@@ -238,6 +238,51 @@ export function scatter(terrain, count, bounds) {
   return out;
 }
 
+/**
+ * Ground clutter: grass tufts, ferns and stones, thick near the player and
+ * gone by forty metres.
+ *
+ * This is the cheapest large visual gain available to a world made of boxes.
+ * Bare shaded ground reads as a technical demo however good the shading is;
+ * the same ground with something growing out of it reads as a place. The tufts
+ * are instances of the same unit cube as everything else, so twelve hundred of
+ * them cost nothing but a bigger buffer upload.
+ */
+export function clutter(terrain, around, radius = 30, count = 2600) {
+  const rng = makeRng(hash(`clutter:${terrain.seed}:${Math.round(around[0] / 32)}:${Math.round(around[1] / 32)}`));
+  const out = [];
+  for (let i = 0; i < count * 2 && out.length < count; i++) {
+    // Sampled in a disc around the player rather than a square, so the density
+    // does not visibly change when you turn on the spot.
+    const a = rng.range(0, Math.PI * 2);
+    const r = Math.sqrt(rng()) * radius;
+    const x = around[0] + Math.cos(a) * r, z = around[1] + Math.sin(a) * r;
+    const y = terrain.heightAt(x, z);
+    if (y < 0.6) continue;                             // nothing grows in the sea
+    if (terrain.slopeAt(x, z) > 0.55) continue;        // nor on a cliff face
+    if (terrain.padFactor(x, z) > 0.35) continue;      // nor through the cobbles
+    // A tuft is short, wide and *lighter* than the ground it grows out of. The
+    // first version was tall, narrow and darker, and the render gate
+    // photographed a meadow of tombstones: at this scale a blade of grass has
+    // to read as a highlight on the ground, not as a silhouette against it.
+    const stone = rng.chance(0.05);
+    const h = stone ? rng.range(0.10, 0.22) : rng.range(0.11, 0.24);
+    const w = stone ? h * rng.range(1.4, 2.2) : rng.range(0.22, 0.42);
+    out.push({
+      pos: [x, y + h / 2, z],
+      yaw: rng.range(0, Math.PI * 2), pitch: stone ? 0 : rng.range(-0.16, 0.16),
+      scale: [w, h, w * rng.range(0.18, 0.42)],
+      albedo: stone
+        ? [0.20, 0.19, 0.18]
+        : [0.15 + rng.range(0, 0.05), 0.24 + rng.range(0, 0.09), 0.08 + rng.range(0, 0.04)],
+      tex: stone ? MAT.ROCK : MAT.FOLIAGE,
+      // Marked so the renderer sways it. Stones do not sway.
+      sway: stone ? 0 : 1,
+    });
+  }
+  return out;
+}
+
 const smooth01 = (t) => {
   const x = t < 0 ? 0 : t > 1 ? 1 : t;
   return x * x * (3 - 2 * x);

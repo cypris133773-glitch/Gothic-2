@@ -33,7 +33,8 @@ layout(location = 3) in vec4 iM0;
 layout(location = 4) in vec4 iM1;
 layout(location = 5) in vec4 iM2;
 layout(location = 6) in vec4 iM3;
-layout(location = 7) in vec4 iTint;   // rgb albedo, a = unused
+layout(location = 7) in vec4 iTint;   // rgb albedo, a = material index
+layout(location = 9) in float iSway;  // 1 for anything the wind moves
 
 uniform mat4 uProj;
 uniform mat4 uView;
@@ -41,6 +42,7 @@ uniform mat4 uModel;
 uniform mat4 uNormal;
 uniform mat4 uLightVP;
 uniform int uInstanced;
+uniform float uTime;
 
 out vec3 vNormal;
 out vec3 vWorld;
@@ -56,6 +58,14 @@ void main() {
   if (uInstanced == 1) {
     mat4 model = mat4(iM0, iM1, iM2, iM3);
     world = model * vec4(aPos, 1.0);
+    // Wind. One global field, sampled by world position, applied only to the
+    // top of a swaying instance so the tuft bends rather than slides. Two
+    // frequencies summed, because a single sine reads as a machine.
+    if (iSway > 0.5 && aPos.y > 0.0) {
+      float phase = world.x * 0.7 + world.z * 0.55;
+      float gust = sin(uTime * 1.1 + phase) * 0.6 + sin(uTime * 2.7 + phase * 1.9) * 0.25;
+      world.xz += vec2(gust, gust * 0.4) * 0.09 * (aPos.y + 0.5);
+    }
     // The instance matrices carry uniform-per-axis scale only, so the inverse
     // transpose is not needed: normalising the rotated normal is enough and it
     // saves shipping a second matrix per instance.
@@ -224,13 +234,22 @@ layout(location = 3) in vec4 iM0;
 layout(location = 4) in vec4 iM1;
 layout(location = 5) in vec4 iM2;
 layout(location = 6) in vec4 iM3;
+layout(location = 9) in float iSway;
 uniform mat4 uLightVP;
 uniform mat4 uModel;
 uniform int uInstanced;
+uniform float uTime;
 void main() {
   vec4 world = uInstanced == 1
     ? mat4(iM0, iM1, iM2, iM3) * vec4(aPos, 1.0)
     : uModel * vec4(aPos, 1.0);
+  // The shadow pass sways with the same field, or the grass and its shadow
+  // walk away from each other in the wind.
+  if (uInstanced == 1 && iSway > 0.5 && aPos.y > 0.0) {
+    float phase = world.x * 0.7 + world.z * 0.55;
+    float gust = sin(uTime * 1.1 + phase) * 0.6 + sin(uTime * 2.7 + phase * 1.9) * 0.25;
+    world.xz += vec2(gust, gust * 0.4) * 0.09 * (aPos.y + 0.5);
+  }
   gl_Position = uLightVP * world;
 }`;
 
@@ -324,7 +343,7 @@ export function createWebGL2Device(canvas, opts = {}) {
 
   // --- geometry --------------------------------------------------------------
 
-  const instanceData = new Float32Array(MAX_INSTANCES * 20);   // mat4 + vec4
+  const instanceData = new Float32Array(MAX_INSTANCES * 24);   // mat4 + tint + sway + pad
   const instanceBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);
   gl.bufferData(gl.ARRAY_BUFFER, instanceData.byteLength, gl.DYNAMIC_DRAW);
@@ -349,9 +368,14 @@ export function createWebGL2Device(canvas, opts = {}) {
       for (let i = 0; i < 5; i++) {
         const loc = 3 + i;
         gl.enableVertexAttribArray(loc);
-        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, 20 * 4, i * 16);
+        gl.vertexAttribPointer(loc, 4, gl.FLOAT, false, 24 * 4, i * 16);
         gl.vertexAttribDivisor(loc, 1);
       }
+      // The sway flag rides in a sixth slot rather than in an unused component
+      // of the tint, because the tint's alpha already carries the material.
+      gl.enableVertexAttribArray(9);
+      gl.vertexAttribPointer(9, 1, gl.FLOAT, false, 24 * 4, 20 * 4);
+      gl.vertexAttribDivisor(9, 1);
     }
     gl.bindVertexArray(null);
     return { vao, count: index.length, type: indexType };
@@ -469,7 +493,7 @@ export function createWebGL2Device(canvas, opts = {}) {
     for (const box of boxes) {
       if (n >= MAX_INSTANCES) break;
       if (box.invisible) continue;      // collision proxies are not geometry
-      const o = n * 20;
+      const o = n * 24;
       if (box.mat) {
         instanceData.set(box.mat, o);
       } else if (box.roll) {
@@ -506,10 +530,11 @@ export function createWebGL2Device(canvas, opts = {}) {
       const a = box.albedo;
       instanceData[o + 16] = a[0]; instanceData[o + 17] = a[1]; instanceData[o + 18] = a[2];
       instanceData[o + 19] = box.tex || 0;
+      instanceData[o + 20] = box.sway || 0;
       n++;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, n * 20));
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, instanceData.subarray(0, n * 24));
     return n;
   }
 
@@ -548,6 +573,7 @@ export function createWebGL2Device(canvas, opts = {}) {
       gl.cullFace(gl.FRONT);
       gl.useProgram(shadowProg.program);
       gl.uniformMatrix4fv(shadowProg.uniforms.uLightVP, false, lightVP);
+      gl.uniform1f(shadowProg.uniforms.uTime, scene.time ?? 0);
 
       gl.uniform1i(shadowProg.uniforms.uInstanced, 0);
       gl.uniformMatrix4fv(shadowProg.uniforms.uModel, false, ident);
@@ -607,6 +633,7 @@ export function createWebGL2Device(canvas, opts = {}) {
     gl.uniform1i(main.uniforms.uShadowOn, shadowOn ? 1 : 0);
     gl.uniform1f(main.uniforms.uShadowTexel, 1 / shadowSize);
     gl.uniform1f(main.uniforms.uExposure, scene.exposure ?? 0.27);
+    gl.uniform1f(main.uniforms.uTime, scene.time ?? 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, shadowTex);
     gl.uniform1i(main.uniforms.uShadow, 0);

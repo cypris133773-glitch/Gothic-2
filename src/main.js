@@ -52,6 +52,9 @@ async function boot() {
     hour: params.has('time') ? Number(params.get('time')) : 9,
     props: params.has('props') ? Number(params.get('props')) : undefined,
     lineup: params.has('lineup'),
+    clutter: params.has('clutter')
+      ? Number(params.get('clutter'))
+      : ({ low: 0, medium: 1100, high: 2600, ultra: 4000 })[tier] ?? 1100,
     start: params.has('start') ? params.get('start').split(',').map(Number) : undefined,
     yaw: params.has('yaw') ? Number(params.get('yaw')) : undefined,
   });

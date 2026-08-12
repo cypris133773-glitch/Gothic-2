@@ -49,6 +49,7 @@ async function boot() {
     seed: Number(params.get('seed')) || 1,
     hour: params.has('time') ? Number(params.get('time')) : 9,
     props: params.has('props') ? Number(params.get('props')) : undefined,
+    lineup: params.has('lineup'),
   });
   device.setTerrain(world.chunks());
 
@@ -83,6 +84,31 @@ async function boot() {
     return [Math.round(innerWidth * scale), Math.round(innerHeight * scale)];
   };
 
+  // The character sheet parks the camera in front of the row instead of behind
+  // the player. It is a preview, so it is allowed to be a fixed framing; every
+  // other camera in the game is the spring arm.
+  const lineupCam = params.has('lineup');
+  const frameLineup = () => {
+    const c = world.camera;
+    const ground = world.people[0].pos[1];
+    c.pos[0] = 0.2; c.pos[1] = ground + 1.25; c.pos[2] = -5.0;
+    c.target[0] = 0; c.target[1] = ground + 0.95; c.target[2] = 0;
+    c.fov = 46;
+  };
+
+  /**
+   * The sheet gets its own key light. The world's sun is where the clock says
+   * it is, and at every hour that matters it is behind a row of characters
+   * facing the camera — which is correct for the world and useless for looking
+   * at armour. A three-quarter key from over the camera's shoulder is what a
+   * character sheet is for.
+   */
+  const lightLineup = (sc) => {
+    const d = [-0.42, 0.66, -0.62];
+    const len = Math.hypot(d[0], d[1], d[2]);
+    sc.sunDir[0] = d[0] / len; sc.sunDir[1] = d[1] / len; sc.sunDir[2] = d[2] / len;
+  };
+
   // The render gate (tools/shot.mjs) reads this, and it runs *before* the
   // animation loop rather than inside it, on purpose. Headless Chromium dumps
   // the page when its virtual-time budget expires, and requestAnimationFrame is
@@ -95,7 +121,10 @@ async function boot() {
     device.resize(Math.round(innerWidth * scale), Math.round(innerHeight * scale));
     for (let i = 0; i < PROBE_FRAME; i++) {
       world.tick(TICK_MS / 1000, idleIntent());
-      device.draw(world.scene());
+      if (lineupCam) frameLineup();
+      const sc = world.scene();
+      if (lineupCam) lightLineup(sc);
+      device.draw(sc);
     }
     api.probe = {
       ...device.stats, frames: PROBE_FRAME, backend: device.backend,
@@ -129,9 +158,12 @@ async function boot() {
       ticks++;
     }
 
+    if (lineupCam) frameLineup();
     const [w, h] = sizeFor();
     device.resize(w, h);
-    device.draw(world.scene());
+    const sc = world.scene();
+    if (lineupCam) lightLineup(sc);
+    device.draw(sc);
 
     api.frames++;
     if (api.frames % 10 === 0) {

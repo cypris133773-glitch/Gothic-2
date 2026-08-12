@@ -94,7 +94,10 @@ function serve() {
 // M0 has one scene, so there is one framing. The list grows with the world and
 // the committed reference images grow with it (§12 of the brief, pillar P12).
 
-const SCENES = opt('time')
+const LINEUP = !!opt('lineup');
+const SCENES = LINEUP
+  ? [{ name: 'models', time: 11 }]
+  : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]
   : [
       { name: 'morning', time: 9 },
@@ -136,7 +139,7 @@ async function run() {
       process.stdout.write(`  ${scene.name} …\r`);
       // tier=medium on purpose: the gate photographs what a normal machine
       // sees, not what this GPU-less container would default itself to.
-      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium`;
+      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium${LINEUP ? '&lineup=1' : ''}`;
       await page.send('Page.navigate', { url });
       const probe = await page.waitFor('window.GRIMWARD && window.GRIMWARD.probe',
         { timeout: 60000, what: `${scene.name} to render` });

@@ -43,6 +43,31 @@ function buildTown(terrain, seed) {
   return boxes;
 }
 
+/**
+ * A character sheet: every kit, side by side, on flat ground, facing the camera.
+ *
+ * It is a mode of the real world rather than a separate viewer — the same rig,
+ * the same materials, the same lighting — so it cannot drift out of step with
+ * what the game actually draws, which is the entire point of having one.
+ */
+function makeLineup(terrain) {
+  const kits = ['knight', 'guard', 'smith', 'villager'];
+  return kits.map((name, i) => {
+    const x = (i - (kits.length - 1) / 2) * 1.9;
+    const z = 0;
+    return {
+      id: `kit_${name}`, kitName: name,
+      pos: new Float32Array([x, terrain.heightAt(x, z), z]),
+      yaw: Math.PI,                             // facing -Z, which is where the camera is
+      // Alternating stride phases so the sheet shows the gait as well as the
+      // gear: two mid-step, two standing.
+      speed: i % 2 === 0 ? 0 : 3.4,
+      phase: i * 1.9,
+      kit: KITS[name], route: null, leg: 0, routeSpeed: 0, pause: 0,
+    };
+  });
+}
+
 /** The townspeople. Routes are placeholders until the M8 routine system. */
 function makePeople(terrain, seed) {
   const rng = makeRng(seed * 104729 + 7);
@@ -106,15 +131,16 @@ export function createWorld(opts = {}) {
 
   // The player starts on the square, which the terrain generator flattens, so a
   // fresh game never begins halfway up a cliff.
-  const player = createPlayer(0, 8, terrain);
+  const player = createPlayer(0, opts.lineup ? -30 : 8, terrain);
   player.yaw = Math.PI;                       // looking at the town
   player.kit = KITS.knight;
   player.phase = 0;
   const camera = createCamera();
 
-  const props = scatter(terrain, opts.props ?? 260, [-110, -110, 110, 110]);
-  const town = opts.town === false ? [] : buildTown(terrain, seed);
-  const people = opts.people === false ? [] : makePeople(terrain, seed);
+  const props = scatter(terrain, opts.lineup ? 0 : (opts.props ?? 260), [-110, -110, 110, 110]);
+  const town = (opts.town === false || opts.lineup) ? [] : buildTown(terrain, seed);
+  const people = opts.lineup ? makeLineup(terrain)
+    : opts.people === false ? [] : makePeople(terrain, seed);
 
   // Everything the character controller can bump into.
   const obstacles = [...props, ...town].filter((b) => b.radius);

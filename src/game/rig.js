@@ -32,7 +32,7 @@ export const KITS = {
     torso: [0.42, 0.44, 0.48], limb: [0.33, 0.34, 0.38], boot: [0.13, 0.10, 0.08],
     trim: [0.52, 0.44, 0.20], tabard: [0.40, 0.08, 0.08],
     plate: true, tabardOn: true, helm: false, sword: true, shoulders: 1.25,
-    texTorso: MAT.STEEL, texLimb: MAT.STEEL, texCloth: MAT.CLOTH,
+    texTorso: MAT.STEEL, texLimb: MAT.STEEL, texCloth: MAT.CLOTH, beard: true,
   },
   guard: {
     skin: [0.48, 0.35, 0.27], hair: [0.11, 0.08, 0.06],
@@ -53,7 +53,7 @@ export const KITS = {
     torso: [0.19, 0.15, 0.13], limb: [0.44, 0.32, 0.24], boot: [0.11, 0.09, 0.07],
     trim: [0.23, 0.18, 0.14], tabard: [0.16, 0.12, 0.10],
     plate: false, tabardOn: true, helm: false, sword: false, shoulders: 1.1,
-    texTorso: MAT.LEATHER, texLimb: MAT.SKIN, texCloth: MAT.LEATHER,
+    texTorso: MAT.LEATHER, texLimb: MAT.SKIN, texCloth: MAT.LEATHER, beard: true,
   },
 };
 
@@ -92,20 +92,35 @@ function rotationZ(out, rad) {
  * along the swung direction.
  */
 function limb(out, joint, len, thick, yaw, swing, splay, colorOut, color) {
-  const sx = Math.sin(swing), cx = Math.cos(swing);
-  const sz = Math.sin(splay), cz = Math.cos(splay);
-  // Direction from joint to the limb's far end, in the character's local frame.
-  const lx = -sz * cx, ly = -cz * cx, lz = sx;
-  const cy = Math.cos(yaw), sy = Math.sin(yaw);
-  const wx = lx * cy + lz * sy;
-  const wz = -lx * sy + lz * cy;
-  const px = joint[0] + wx * len * 0.5;
-  const py = joint[1] + ly * len * 0.5;
-  const pz = joint[2] + wz * len * 0.5;
-  part(out, [px, py, pz], [thick, len, thick], yaw, swing, splay);
+  limbEnd(_end, joint, len * 0.5, yaw, swing, splay);
+  part(out, _end, [thick, len, thick], yaw, swing, splay);
   colorOut.set(color);
   return out;
 }
+
+/**
+ * Where a limb's far end lands, given its joint and its swing.
+ *
+ * This exists because the knee and the ankle used to be computed by hand, with
+ * a simplification — forward component only, splay ignored — while `limb` placed
+ * the actual box with the full rotation. The two agreed while the swing was
+ * small and came apart at a running stride, which the character sheet caught:
+ * a shin and a boot walking along a little way from the leg they belong to.
+ * One function, used by both, cannot drift.
+ */
+function limbEnd(out, joint, len, yaw, swing, splay) {
+  const cx = Math.cos(swing), sx = Math.sin(swing);
+  const cz = Math.cos(splay), sz = Math.sin(splay);
+  // Direction from joint to far end, in the character's local frame…
+  const lx = -sz * cx, ly = -cz * cx, lz = sx;
+  // …then rotated into the world by the character's facing.
+  const cy = Math.cos(yaw), sy = Math.sin(yaw);
+  out[0] = joint[0] + (lx * cy + lz * sy) * len;
+  out[1] = joint[1] + ly * len;
+  out[2] = joint[2] + (-lx * sy + lz * cy) * len;
+  return out;
+}
+const _end = [0, 0, 0], _joint = [0, 0, 0], _joint2 = [0, 0, 0];
 
 /**
  * Pose a character.
@@ -181,8 +196,26 @@ export function poseHumanoid(out, state) {
   part(p.mat, at(0, headY, 0), [HEAD * 0.78, HEAD * 0.92, HEAD * 0.82], yaw, 0, 0);
   p.albedo.set(k.helm ? k.torso : k.skin);
 
-  p = next(k.helm ? MAT.STEEL : MAT.FLAT);   // hair or helm crown
-  part(p.mat, at(0, headY + HEAD * 0.40, -0.02), [HEAD * 0.82, HEAD * 0.30, HEAD * 0.86], yaw, 0, 0);
+  // A brow band and, on some kits, a beard. Two boxes, and they are the
+  // difference between a head and a block: the eye line is the first thing a
+  // person reads on another person, at any distance where anything is legible.
+  p = next(MAT.FLAT);
+  part(p.mat, at(0, headY + HEAD * 0.10, HEAD * 0.40),
+    [HEAD * 0.66, HEAD * 0.13, HEAD * 0.06], yaw, 0, 0);
+  p.albedo.set(k.helm ? [0.05, 0.05, 0.06] : [0.14, 0.11, 0.09]);
+
+  if (k.beard) {
+    p = next(MAT.FLAT);
+    part(p.mat, at(0, headY - HEAD * 0.28, HEAD * 0.30),
+      [HEAD * 0.52, HEAD * 0.34, HEAD * 0.24], yaw, 0, 0);
+    p.albedo.set(k.hair);
+  }
+
+  p = next(k.helm ? MAT.STEEL : MAT.FLAT);   // hair, or the crown of a helm
+  // Sat lower and wider than the skull rather than perched above it: at 0.40 of
+  // a head unit up, a helm reads as a slab hovering over its owner.
+  part(p.mat, at(0, headY + HEAD * (k.helm ? 0.30 : 0.34), -0.02),
+    [HEAD * (k.helm ? 0.90 : 0.84), HEAD * (k.helm ? 0.40 : 0.28), HEAD * (k.helm ? 0.92 : 0.88)], yaw, 0, 0);
   p.albedo.set(k.helm ? k.trim : k.hair);
 
   // --- arms ------------------------------------------------------------------
@@ -204,23 +237,14 @@ export function poseHumanoid(out, state) {
     p = next(k.texLimb);
     limb(p.mat, shoulder, upperArm, armThick, yaw, armSwing, splay, p.albedo, k.limb);
 
-    const elbow = [
-      shoulder[0] - Math.sin(splay) * Math.cos(armSwing) * upperArm * (side ? 1 : 1),
-      shoulder[1] - Math.cos(splay) * Math.cos(armSwing) * upperArm,
-      shoulder[2] + Math.sin(armSwing) * upperArm,
-    ];
-    // Rotate the elbow offset into world space around the character's facing.
-    const ex = elbow[0] - shoulder[0], ez = elbow[2] - shoulder[2];
-    elbow[0] = shoulder[0] + ex * Math.cos(yaw) + ez * Math.sin(yaw);
-    elbow[2] = shoulder[2] - ex * Math.sin(yaw) + ez * Math.cos(yaw);
-
+    const elbow = limbEnd(_joint, shoulder, upperArm, yaw, armSwing, splay);
     const bend = armed ? -0.85 : -0.35 - Math.max(0, -armSwing) * 0.4;
-    p = next(k.plate ? k.texLimb : MAT.SKIN);
-    limb(p.mat, elbow, foreArm, armThick * 0.92, yaw, armSwing + bend, splay * 0.5, p.albedo, k.plate ? k.limb : k.skin);
+    const foreSwing = armSwing + bend, foreSplay = splay * 0.5;
 
-    const handY = elbow[1] - Math.cos(armSwing + bend) * foreArm;
-    const handZf = Math.sin(armSwing + bend) * foreArm;
-    const hand = [elbow[0] + fx * handZf, handY, elbow[2] + fz * handZf];
+    p = next(k.plate ? k.texLimb : MAT.SKIN);
+    limb(p.mat, elbow, foreArm, armThick * 0.92, yaw, foreSwing, foreSplay, p.albedo, k.plate ? k.limb : k.skin);
+
+    const hand = limbEnd(_joint2, elbow, foreArm, yaw, foreSwing, foreSplay);
     p = next(MAT.SKIN);
     part(p.mat, hand, [HEAD * 0.30, HEAD * 0.28, HEAD * 0.30], yaw, 0, 0);
     p.albedo.set(k.skin);
@@ -244,21 +268,20 @@ export function poseHumanoid(out, state) {
   for (const side of [-1, 1]) {
     const hip = at(side * HEAD * 0.42, hipY - H * 0.05, 0);
     const legSwing = (side < 0 ? swingB : swing) * 0.9;
+    const legSplay = side * 0.05;
 
     p = next(k.texLimb);
-    limb(p.mat, hip, thigh, legThick, yaw, legSwing, side * 0.05, p.albedo, k.limb);
+    limb(p.mat, hip, thigh, legThick, yaw, legSwing, legSplay, p.albedo, k.limb);
 
-    const kneeZ = Math.sin(legSwing) * thigh;
-    const knee = [hip[0] + fx * kneeZ, hip[1] - Math.cos(legSwing) * thigh, hip[2] + fz * kneeZ];
-    // A knee only bends backwards, and only on the leg that is trailing.
-    const kneeBend = Math.max(0, -legSwing) * 1.15 + crouch * 0.6;
+    const knee = limbEnd(_joint, hip, thigh, yaw, legSwing, legSplay);
+    // A knee bends backwards only, and only on the trailing leg.
+    const shinSwing = legSwing - (Math.max(0, -legSwing) * 1.15 + crouch * 0.6);
     p = next(k.texLimb);
-    limb(p.mat, knee, shin, legThick * 0.88, yaw, legSwing - kneeBend, side * 0.03, p.albedo, k.limb);
+    limb(p.mat, knee, shin, legThick * 0.88, yaw, shinSwing, legSplay * 0.6, p.albedo, k.limb);
 
-    const ankleZ = kneeZ + Math.sin(legSwing - kneeBend) * shin;
-    const ankleY = knee[1] - Math.cos(legSwing - kneeBend) * shin;
+    const ankle = limbEnd(_joint2, knee, shin, yaw, shinSwing, legSplay * 0.6);
     p = next(MAT.LEATHER);
-    part(p.mat, [hip[0] + fx * (ankleZ + 0.03), ankleY - HEAD * 0.10, hip[2] + fz * (ankleZ + 0.03)],
+    part(p.mat, [ankle[0] + fx * 0.03, ankle[1] - HEAD * 0.10, ankle[2] + fz * 0.03],
       [legThick * 1.05, HEAD * 0.24, HEAD * 0.62], yaw, 0, 0);
     p.albedo.set(k.boot);
   }

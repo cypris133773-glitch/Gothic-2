@@ -43,6 +43,7 @@ async function boot() {
   const device = await createDevice(canvas, caps, {
     shadows: !off.has('shadows') && tier !== 'low',
     shadowSize: tier === 'high' ? 2048 : 1024,
+    textures: !off.has('textures') && tier !== 'low',
   });
   const world = createWorld({
     seed: Number(params.get('seed')) || 1,
@@ -96,10 +97,14 @@ async function boot() {
       world.tick(TICK_MS / 1000, idleIntent());
       device.draw(world.scene());
     }
-    document.title = `PROBE ${JSON.stringify({
+    api.probe = {
       ...device.stats, frames: PROBE_FRAME, backend: device.backend,
       tier, clock: world.clock.hhmm, ...device.readPixelStats(),
-    })}`;
+    };
+    // Both channels on purpose: the title survives --dump-dom for a one-shot
+    // launch, and the object is what the CDP-driven gate reads when it is
+    // stepping one browser through every framing.
+    document.title = `PROBE ${JSON.stringify(api.probe)}`;
   }
 
   let last = performance.now();

@@ -12,6 +12,7 @@
 // allocates nothing and it depends on nothing but the seed.
 
 import { makeRng, hash } from '../core/rng.js';
+import { MAT } from '../assets/texgen.js';
 
 export const TERRAIN_SIZE = 256;      // metres across, centred on the origin
 export const SEA_LEVEL = 0;           // y = 0 is the waterline, everywhere
@@ -103,7 +104,7 @@ export function createTerrain(seed = 1) {
  * has been built rather than pretending at a clipmap that has not.
  */
 export function buildChunk(terrain, cx, cz, chunkSize, res) {
-  const verts = new Float32Array((res + 1) * (res + 1) * 9);   // pos, normal, colour
+  const verts = new Float32Array((res + 1) * (res + 1) * 11);  // pos, normal, colour, weights
   const index = new Uint32Array(res * res * 6);
   const step = chunkSize / res;
   const n = new Float32Array(3);
@@ -137,6 +138,12 @@ export function buildChunk(terrain, cx, cz, chunkSize, res) {
         const land = base * (1 - shore) + sh[c] * shore;
         verts[v++] = land * (1 - paved) + cob[c] * paved;
       }
+      // Which detail material this vertex wears. The colour blends smoothly and
+      // the pattern switches at the halfway point, which at this detail
+      // strength is far less visible than the three texture fetches a real
+      // blend would cost on every pixel of the ground.
+      verts[v++] = rock;
+      verts[v++] = paved;
     }
   }
   let k = 0;
@@ -174,6 +181,7 @@ export function scatter(terrain, count, bounds) {
       yaw, pitch: 0,
       scale: [w, h, w],
       albedo: tree ? [0.10, 0.07, 0.05] : [0.21, 0.20, 0.19],
+      tex: tree ? MAT.BARK : MAT.ROCK,
       radius: w * 0.7,
       spin: 0,
     });
@@ -186,6 +194,7 @@ export function scatter(terrain, count, bounds) {
         yaw: yaw * 0.6, pitch: 0,
         scale: [cw, rng.range(2.4, 3.6), cw],
         albedo: [0.09 + rng.range(0, 0.03), 0.145 + rng.range(0, 0.045), 0.06],
+        tex: MAT.FOLIAGE,
         spin: 0,
       });
     }

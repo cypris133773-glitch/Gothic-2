@@ -48,21 +48,26 @@ What exists, and the command that proves it:
 | People | Six townsfolk, three of them walking routes with a pause and a turn at each end | `npm run play` |
 | Lighting | One shadow cascade with 3×3 PCF, slope-scaled bias and texel snapping; a gradient sky with sun disc, glow and horizon haze; exposure, ACES and a saturation/split-tone grade | `npm run shot` |
 | Instancing | Every box in the world — limbs, beams, barrels, roof slabs — is one instanced draw call | `npm run perf` |
+| Materials | Sixteen tiles synthesised in code at startup — plaster, timber, slate, cobble, grass, rock, cloth, steel, leather, plank, thatch, skin, bark, foliage, dirt — in one array texture, sampled triplanar down the dominant axis | `npm run shot` |
 
 Next is **M3** (the worldgen tool, the in-browser placement editor, baked nav
 data), then the rest of **M4/M5**: LOD and streaming so the town is not the
 whole world, and real interiors. The milestone table is §14 of the brief.
 
-Shadows are tied to the quality tier. They double the geometry submitted per
-frame, which is nothing on a GPU and is the difference between 19 fps and 14 on
-the CPU rasteriser CI runs on, so the `low` tier turns them off and
-`?off=shadows` turns them off anywhere.
+Two things are tied to the quality tier: shadows and material detail. Both are
+nearly free on a GPU and both are expensive on a software rasteriser — one
+dependent texture fetch per pixel of a screen that is mostly ground — so `low`
+goes without them, and `?off=shadows` / `?off=textures` switch them off
+anywhere.
+
+
 
 ## The render gate
 
 `npm run shot` is the reason a black screen cannot be reported as progress. It
 launches the Chromium already on the machine — no Playwright, no dependency —
-renders four times of day, and then asks two independent questions about each:
+steps one browser through four times of day over the DevTools protocol, and
+then asks two independent questions about each:
 what the page saw (draw calls, triangles, luminance range, distinct colours,
 read back from the framebuffer) and what the PNG contains (decoded in Node with
 `zlib`, no image library). A frame that is flat, black, or that the page and the
@@ -70,8 +75,12 @@ image disagree about fails the build.
 
 It found two real bugs on its first day — a sky model that switched daylight
 off at the horizon and photographed dusk as a single flat colour, and a ground
-plane built as a cube the camera was standing inside — and a third the day
-after: a settlement built on what the shading had decided was a beach.
+plane built as a cube the camera was standing inside — and it has kept
+earning it since: a settlement built on what the shading had decided was a
+beach, a roof whose trigonometry was inside out, a town rendered in a snowstorm
+because there was no exposure control, and a fragment shader that would not
+compile for want of a precision qualifier — reported with the driver's log next
+to a numbered listing of the source.
 
 ## The input harness
 

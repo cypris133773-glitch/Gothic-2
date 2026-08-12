@@ -12,11 +12,9 @@
  *    statistics from inside the frame (mean luminance, distinct colour count)
  *    and this tool asserts on those. The image is for humans; the numbers are
  *    for CI.
- * 2. **No dependencies.** It drives the Chromium that is already on the machine
- *    through its command line rather than through Playwright, so `npm ls --prod`
- *    stays empty and the test story does not start with a 300 MB install. The
- *    richer harness (real input events through CDP) arrives at M2 with the
- *    character controller, which is the first thing that needs it.
+ * 2. **No dependencies.** It drives the Chromium already on the machine over the
+ *    DevTools protocol (tools/cdp.mjs), so `npm ls --prod` stays empty and the
+ *    test story does not start with a 300 MB install.
  * 3. **It serves over http://.** ES modules refuse to load from file://, so the
  *    dev server is started in-process on an ephemeral port and shut down after.
  */
@@ -28,6 +26,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { connect, findPageTarget } from './cdp.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -46,6 +45,7 @@ const OUT = path.resolve(ROOT, String(opt('out', 'shots')));
 // this gate answers a different question: was a lit frame produced at all.
 const [W, H] = String(opt('size', '800x450')).split('x').map(Number);
 const SEED = String(opt('seed', '1'));
+const PORT_DEVTOOLS = 9335;
 
 // --- find a browser ---------------------------------------------------------
 
@@ -107,92 +107,57 @@ async function run() {
   const chrome = findChrome();
   const { server, port } = await serve();
   fs.mkdirSync(OUT, { recursive: true });
+  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'grimward-shot-'));
+
+  // One browser for every framing, stepped through them over the DevTools
+  // protocol. It used to be one launch per framing, and roughly one run in two
+  // died on the third: a cold headless Chromium on a loaded machine starts,
+  // loads nothing, and exits zero — which reads exactly like a broken renderer
+  // and is not one. Launching once removes the failure mode instead of retrying
+  // past it, and it is three times faster.
+  const child = spawn(chrome, [
+    '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
+    '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
+    `--window-size=${W},${H}`, `--user-data-dir=${profile}`,
+    `--remote-debugging-port=${PORT_DEVTOOLS}`,
+    'about:blank',
+  ], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', (d) => { stderr += d; });
 
   const results = [];
-  for (const scene of SCENES) {
-    const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}`;
-    const png = path.join(OUT, `${scene.name}.png`);
-    process.stdout.write(`  ${scene.name} …\r`);
-    // One launch per scene: the image and the page's own report come out of the
-    // same run. That was not possible while the probe waited for an animation
-    // frame — the DOM was dumped first and never contained it — and it matters
-    // beyond tidiness, because every extra headless Chromium on this machine
-    // makes the next one likelier to start and render nothing.
-    // Up to three attempts, with a breath between them. A cold headless
-    // Chromium on a busy machine sometimes starts, loads nothing and exits
-    // zero — the page never ran, so there is nothing to assert on. Retrying is
-    // right here in a way it usually is not: the failure is in the harness's
-    // environment, not in the thing under test, and the assertions below are
-    // unchanged either way.
-    let dom = '';
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt) await new Promise((r) => setTimeout(r, 1500));
-      dom = await launch(chrome, url, { png, dump: true });
-      if (/<title>PROBE/.test(dom)) break;
+  try {
+    const target = await findPageTarget(PORT_DEVTOOLS);
+    const page = await connect(target.webSocketDebuggerUrl);
+    await page.send('Page.enable');
+    await page.send('Runtime.enable');
+
+    for (const scene of SCENES) {
+      process.stdout.write(`  ${scene.name} …\r`);
+      // tier=medium on purpose: the gate photographs what a normal machine
+      // sees, not what this GPU-less container would default itself to.
+      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium`;
+      await page.send('Page.navigate', { url });
+      const probe = await page.waitFor('window.GRIMWARD && window.GRIMWARD.probe',
+        { timeout: 60000, what: `${scene.name} to render` });
+      if (probe.error || !probe.drawCalls) throw new Error(`${scene.name}: the page reported ${JSON.stringify(probe)}`);
+
+      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+      const png = path.join(OUT, `${scene.name}.png`);
+      fs.writeFileSync(png, Buffer.from(shot.data, 'base64'));
+      results.push({ scene: scene.name, png, probe, image: decodePng(png) });
     }
-    let probe;
-    try { probe = parseProbe(dom); }
-    catch (e) {
-      const dump = path.join(OUT, `${scene.name}.dom.html`);
-      fs.writeFileSync(dump, dom);
-      throw new Error(`${scene.name}: ${e.message}\n  url:  ${url}\n  dom:  ${dump}`);
-    }
-    results.push({ scene: scene.name, png, probe, image: decodePng(png) });
+    page.close();
+  } catch (e) {
+    const tail = stderr.split('\n').filter((l) => !/dbus|bluez|upower|Consistency/i.test(l)).slice(-6).join('\n');
+    throw new Error(`${e.message}${tail ? `\n\nbrowser stderr:\n${tail}` : ''}`);
+  } finally {
+    child.kill('SIGKILL');
+    server.close();
+    await new Promise((r) => setTimeout(r, 200));
+    fs.rmSync(profile, { recursive: true, force: true, maxRetries: 8, retryDelay: 150 });
   }
-  server.close();
   report(results);
-}
-
-function launch(chrome, url, { png = null, dump = false } = {}) {
-  return new Promise((resolve, reject) => {
-    // A private profile per launch. Sharing the default one across two
-    // back-to-back launches was producing a browser that started, painted
-    // nothing and exited zero — which reads exactly like a broken renderer and
-    // is not one. Isolation makes the gate repeatable, which is the whole point
-    // of a gate.
-    const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'grimward-'));
-    const args = [
-      `--user-data-dir=${profile}`,
-      '--headless=new', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
-      // SwiftShader: CI has no GPU, and a software rasteriser that draws the
-      // right image is a better gate than a hardware one that is unavailable.
-      '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader',
-      `--window-size=${W},${H}`,
-      // Enough virtual time for the module graph, the context and a frame.
-      '--virtual-time-budget=10000',
-      ...(png ? [`--screenshot=${png}`] : []),
-      ...(dump ? ['--dump-dom'] : []),
-      url,
-    ];
-    const child = spawn(chrome, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    let out = '', err = '';
-    child.stdout.on('data', (d) => { out += d; });
-    child.stderr.on('data', (d) => { err += d; });
-    const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('chromium timed out')); }, 90000);
-    child.on('exit', (code) => {
-      clearTimeout(timer);
-      fs.rmSync(profile, { recursive: true, force: true });
-      if (code !== 0 && !out) reject(new Error(`chromium exited ${code}\n${err.slice(-2000)}`));
-      else resolve(out);
-    });
-  });
-}
-
-function parseProbe(dom) {
-  const m = dom.match(/<title>PROBE (\{.*?\})<\/title>/s);
-  if (!m) {
-    // Say which of the three things went wrong, because "no probe" covers a
-    // page that refused to boot, a page that booted and threw, and a browser
-    // that printed nothing at all — and they have different fixes.
-    const gate = dom.match(/<p id="gate-why">([^<]*)<\/p>/);
-    const detail = !dom.trim()
-      ? 'the browser printed no DOM at all'
-      : gate && gate[1]
-        ? `the page refused to run: ${gate[1]}`
-        : `the page rendered but never set the probe title (${dom.length} bytes of DOM)`;
-    throw new Error(`no probe from the page — ${detail}`);
-  }
-  return JSON.parse(m[1].replace(/&quot;/g, '"'));
 }
 
 /**

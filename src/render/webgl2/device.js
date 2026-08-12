@@ -16,6 +16,7 @@
 
 import { link } from './shader.js';
 import * as m from '../../core/math.js';
+import { buildMaterialArray, MAT, MAT_COUNT } from '../../assets/texgen.js';
 
 const MAX_INSTANCES = 8192;
 
@@ -25,6 +26,7 @@ precision highp float;
 layout(location = 0) in vec3 aPos;
 layout(location = 1) in vec3 aNormal;
 layout(location = 2) in vec3 aColor;
+layout(location = 8) in vec2 aWeights;   // terrain only: rock, paved
 // Per instance: a mat4 occupies four consecutive attribute slots, because an
 // attribute slot is a vec4 and a matrix is simply four of them.
 layout(location = 3) in vec4 iM0;
@@ -44,6 +46,8 @@ out vec3 vNormal;
 out vec3 vWorld;
 out vec3 vColor;
 out vec4 vLightPos;
+out float vMat;
+out vec2 vWeights;
 
 void main() {
   vec4 world;
@@ -57,7 +61,9 @@ void main() {
     // saves shipping a second matrix per instance.
     normal = normalize(mat3(model) * aNormal);
     tint = iTint.rgb;
+    vMat = iTint.a;          // the material index rides in the tint's alpha
   } else {
+    vMat = -1.0;             // terrain picks its material per pixel
     world = uModel * vec4(aPos, 1.0);
     normal = mat3(uNormal) * aNormal;
     tint = aColor;
@@ -65,6 +71,7 @@ void main() {
   vWorld = world.xyz;
   vNormal = normal;
   vColor = tint;
+  vWeights = aWeights;
   vLightPos = uLightVP * world;
   gl_Position = uProj * uView * world;
 }`;
@@ -72,11 +79,17 @@ void main() {
 const FRAG = `#version 300 es
 precision highp float;
 precision highp sampler2DShadow;
+// GLSL ES has no default precision for sampler array types, so leaving this out
+// is a compile error rather than a warning. The shader compiler says so, with a
+// line number, because every compile in this renderer is checked (§3.2).
+precision highp sampler2DArray;
 
 in vec3 vNormal;
 in vec3 vWorld;
 in vec3 vColor;
 in vec4 vLightPos;
+in float vMat;
+in vec2 vWeights;
 
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
@@ -88,6 +101,15 @@ uniform sampler2DShadow uShadow;
 uniform float uShadowTexel;
 uniform int uShadowOn;
 uniform float uExposure;
+uniform sampler2DArray uMaterials;
+uniform float uMatScale[16];
+uniform int uTextured;
+
+// Terrain has no per-instance material, so it names the three it blends
+// between. Keep these in step with MAT in src/assets/texgen.js.
+const float MAT_COBBLE = 4.0;
+const float MAT_GRASS = 5.0;
+const float MAT_ROCK = 6.0;
 
 out vec4 outColor;
 
@@ -118,6 +140,25 @@ float shadowFactor(float ndl) {
   return sum / 9.0;
 }
 
+/**
+ * One texture fetch, projected down whichever axis the surface faces most.
+ *
+ * Full triplanar blending costs three fetches and buys a smooth transition on
+ * the 45-degree faces; on a software rasteriser that is most of the frame
+ * budget, and on a world made of axis-aligned boxes there are almost no such
+ * faces. Dominant-axis it is, and the seam it can produce lives on the corner
+ * of a box where a wooden beam already is.
+ */
+vec3 material(float layer, vec3 p, vec3 n) {
+  if (uTextured == 0 || layer < 0.5) return vec3(1.0);   // off, or MAT.FLAT
+  float scale = uMatScale[int(layer)];
+  vec3 an = abs(n);
+  vec2 uv = (an.y > an.x && an.y > an.z) ? p.xz
+          : (an.x > an.z) ? p.zy
+          : p.xy;
+  return texture(uMaterials, vec3(uv * scale, layer)).rgb;
+}
+
 void main() {
   vec3 n = normalize(vNormal);
   vec3 toEye = uEye - vWorld;
@@ -137,7 +178,16 @@ void main() {
   float spec = pow(max(dot(n, h), 0.0), 42.0) * 0.16 * step(0.001, ndl) * shade;
   float rim = pow(1.0 - max(dot(n, v), 0.0), 3.0) * 0.12;
 
-  vec3 lit = vColor * (direct + ambient) + uSunColor * spec + uSkyColor * rim;
+  // The terrain chooses its material per pixel from the weights the mesh
+  // carries; everything else was told which one it is wearing.
+  float layer = vMat;
+  if (layer < 0.0) {
+    layer = vWeights.y > 0.5 ? MAT_COBBLE : (vWeights.x > 0.5 ? MAT_ROCK : MAT_GRASS);
+  }
+  vec3 detail = material(layer, vWorld, n);
+  vec3 albedo = vColor * detail;
+
+  vec3 lit = albedo * (direct + ambient) + uSunColor * spec + uSkyColor * rim;
 
   // Exposure, applied before the tonemapper because that is where it belongs.
   // Without it the whole world sat at the top of the ACES curve and the render
@@ -246,7 +296,7 @@ function cubeMesh() {
   const index = [];
   faces.forEach((f, fi) => {
     for (const v of f.v) {
-      data.push(v[0] * 0.5, v[1] * 0.5, v[2] * 0.5, f.n[0], f.n[1], f.n[2], 1, 1, 1);
+      data.push(v[0] * 0.5, v[1] * 0.5, v[2] * 0.5, f.n[0], f.n[1], f.n[2], 1, 1, 1, 0, 0);
     }
     const b = fi * 4;
     index.push(b, b + 1, b + 2, b, b + 2, b + 3);
@@ -266,7 +316,7 @@ export function createWebGL2Device(canvas, opts = {}) {
   const shadowProg = link(gl, SHADOW_VERT, SHADOW_FRAG, 'shadow');
   const skyProg = link(gl, SKY_VERT, SKY_FRAG, 'sky');
   const emptyVao = gl.createVertexArray();
-  const STRIDE = 9 * 4;
+  const STRIDE = 11 * 4;    // pos3, normal3, colour3, weights2
 
   // --- geometry --------------------------------------------------------------
 
@@ -288,6 +338,8 @@ export function createWebGL2Device(canvas, opts = {}) {
       gl.enableVertexAttribArray(loc);
       gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, STRIDE, loc * 3 * 4);
     }
+    gl.enableVertexAttribArray(8);
+    gl.vertexAttribPointer(8, 2, gl.FLOAT, false, STRIDE, 9 * 4);
     if (instanced) {
       gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);
       for (let i = 0; i < 5; i++) {
@@ -305,10 +357,56 @@ export function createWebGL2Device(canvas, opts = {}) {
   const cubeVao = makeVao(cube.data, cube.index, gl.UNSIGNED_SHORT, true);
   let chunks = [];
 
+  // --- materials -------------------------------------------------------------
+  // Every surface in the game comes out of src/assets/texgen.js, generated here
+  // at startup. One array texture, one texture unit, no files.
+  const mats = buildMaterialArray();
+  const matTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, matTex);
+  gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, mats.size, mats.size, mats.layers,
+    0, gl.RGBA, gl.UNSIGNED_BYTE, mats.data);
+  gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.REPEAT);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.REPEAT);
+  const anis = gl.getExtension('EXT_texture_filter_anisotropic');
+  if (anis) {
+    // Ground planes seen at a grazing angle are exactly where anisotropy pays,
+    // and the ground is most of this game's screen.
+    gl.texParameterf(gl.TEXTURE_2D_ARRAY, anis.TEXTURE_MAX_ANISOTROPY_EXT,
+      Math.min(8, gl.getParameter(anis.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+  }
+
+  // Tiles per metre, per material. Cobbles want to be about the size of a
+  // cobble; a chainmail weave wants to be much finer than a plaster wall.
+  const MAT_SCALE = new Float32Array(MAT_COUNT);
+  MAT_SCALE.fill(0.5);
+  MAT_SCALE[MAT.PLASTER] = 0.35;
+  MAT_SCALE[MAT.TIMBER] = 0.8;
+  MAT_SCALE[MAT.SLATE] = 0.55;
+  MAT_SCALE[MAT.COBBLE] = 0.62;
+  MAT_SCALE[MAT.GRASS] = 0.42;
+  MAT_SCALE[MAT.ROCK] = 0.22;
+  MAT_SCALE[MAT.CLOTH] = 2.2;
+  MAT_SCALE[MAT.STEEL] = 4.5;
+  MAT_SCALE[MAT.LEATHER] = 3.0;
+  MAT_SCALE[MAT.PLANK] = 0.9;
+  MAT_SCALE[MAT.THATCH] = 0.9;
+  MAT_SCALE[MAT.SKIN] = 3.0;
+  MAT_SCALE[MAT.BARK] = 1.4;
+  MAT_SCALE[MAT.FOLIAGE] = 0.7;
+  MAT_SCALE[MAT.DIRT] = 0.4;
+
   // --- shadow map ------------------------------------------------------------
 
   const shadowSize = opts.shadowSize || 1024;
   let shadowOn = opts.shadows !== false;
+  // Material detail is a quality lever like the shadow pass. It is nearly free
+  // on a GPU and it is the most expensive thing in the frame on a software
+  // rasteriser — one dependent texture fetch per pixel of a screen that is
+  // mostly ground — so the lowest tier goes without it.
+  let textured = opts.textures !== false;
   const shadowTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, shadowTex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, shadowSize, shadowSize, 0,
@@ -403,7 +501,7 @@ export function createWebGL2Device(canvas, opts = {}) {
       }
       const a = box.albedo;
       instanceData[o + 16] = a[0]; instanceData[o + 17] = a[1]; instanceData[o + 18] = a[2];
-      instanceData[o + 19] = 1;
+      instanceData[o + 19] = box.tex || 0;
       n++;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);
@@ -508,6 +606,11 @@ export function createWebGL2Device(canvas, opts = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, shadowTex);
     gl.uniform1i(main.uniforms.uShadow, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D_ARRAY, matTex);
+    gl.uniform1i(main.uniforms.uMaterials, 1);
+    gl.uniform1fv(main.uniforms.uMatScale, MAT_SCALE);
+    gl.uniform1i(main.uniforms.uTextured, textured ? 1 : 0);
 
     // Terrain first: opaque, covers most of the screen, and drawing it before
     // the props means the depth buffer rejects most of their pixels.
@@ -556,6 +659,8 @@ export function createWebGL2Device(canvas, opts = {}) {
     resize, setTerrain, draw, readPixelStats,
     get shadows() { return shadowOn; },
     set shadows(v) { shadowOn = !!v; },
+    get textured() { return textured; },
+    set textured(v) { textured = !!v; },
     get stats() { return { drawCalls, triangles, instances, width, height }; },
   };
 }

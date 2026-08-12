@@ -12,6 +12,7 @@
 // lines they cost.
 
 import { makeRng, hash } from '../core/rng.js';
+import { MAT } from '../assets/texgen.js';
 
 // Albedos, not screen colours: these are multiplied by a sun of about 2.6 and
 // then exposed and tonemapped, so a "white" plaster wall is authored at 0.55
@@ -40,16 +41,16 @@ export function buildHouse(spec) {
 
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
   /** Place a box given in the building's local frame. */
-  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0) => {
+  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0, tex = MAT.PLASTER) => {
     out.push({
       pos: [spec.x + lx * cy + lz * sy, y0 + ly, spec.z - lx * sy + lz * cy],
-      yaw, pitch, scale: [sx, sh, sz], albedo,
+      yaw, pitch, scale: [sx, sh, sz], albedo, tex,
       radius: 0,          // buildings collide as walls, added at the end
     });
   };
 
   // --- stone base ------------------------------------------------------------
-  put(0, 0.28, 0, w + 0.35, 0.56, d + 0.35, pal.stone);
+  put(0, 0.28, 0, w + 0.35, 0.56, d + 0.35, pal.stone, 0, MAT.ROCK);
 
   for (let s = 0; s < storeys; s++) {
     // Each storey above the first juts out a little over the one below it.
@@ -64,18 +65,18 @@ export function buildHouse(spec) {
     // structure rather than as paint.
     const t = 0.17;
     for (const ex of [-1, 1]) {
-      put(ex * sw / 2, base + storeyH / 2, 0, t, storeyH, sd + 0.02, pal.timber);
+      put(ex * sw / 2, base + storeyH / 2, 0, t, storeyH, sd + 0.02, pal.timber, 0, MAT.TIMBER);
     }
     for (const ez of [-1, 1]) {
-      put(0, base + storeyH / 2, ez * sd / 2, sw + 0.02, storeyH, t, pal.timber);
+      put(0, base + storeyH / 2, ez * sd / 2, sw + 0.02, storeyH, t, pal.timber, 0, MAT.TIMBER);
       // rails
-      put(0, base + 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber);
-      put(0, base + storeyH - 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber);
+      put(0, base + 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber, 0, MAT.TIMBER);
+      put(0, base + storeyH - 0.10, ez * sd / 2, sw + 0.04, t, t * 1.1, pal.timber, 0, MAT.TIMBER);
       // uprights across the face
       const bays = Math.max(2, Math.round(sw / 1.8));
       for (let b = 1; b < bays; b++) {
         const lx = -sw / 2 + (sw * b) / bays;
-        put(lx, base + storeyH / 2, ez * sd / 2, t, storeyH, t * 1.1, pal.timber);
+        put(lx, base + storeyH / 2, ez * sd / 2, t, storeyH, t * 1.1, pal.timber, 0, MAT.TIMBER);
       }
       // one diagonal brace per face, tilted in the plane of the wall
       const brace = Math.hypot(sw / bays, storeyH) * 0.9;
@@ -86,12 +87,12 @@ export function buildHouse(spec) {
           spec.z - (-sw / 4) * sy + (ez * sd / 2) * cy,
         ],
         yaw, pitch: 0, roll: 0.55 * ez,
-        scale: [t, brace, t * 1.1], albedo: pal.timber, radius: 0,
+        scale: [t, brace, t * 1.1], albedo: pal.timber, tex: MAT.TIMBER, radius: 0,
       });
     }
     for (const ex of [-1, 1]) {
-      put(ex * sw / 2, base + 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber);
-      put(ex * sw / 2, base + storeyH - 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber);
+      put(ex * sw / 2, base + 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber, 0, MAT.TIMBER);
+      put(ex * sw / 2, base + storeyH - 0.10, 0, t * 1.1, t, sd + 0.04, pal.timber, 0, MAT.TIMBER);
     }
 
     // --- openings ------------------------------------------------------------
@@ -102,16 +103,16 @@ export function buildHouse(spec) {
       for (const ez of [-1, 1]) {
         // A dark opening with a lighter frame; the frame is what stops a window
         // reading as a hole punched in a wall.
-        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.03), winW + 0.14, winH + 0.14, 0.06, pal.timber);
-        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.06), winW, winH, 0.05, [0.10, 0.11, 0.13]);
+        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.03), winW + 0.14, winH + 0.14, 0.06, pal.timber, 0, MAT.TIMBER);
+        put(lx, base + storeyH * 0.58, ez * (sd / 2 + 0.06), winW, winH, 0.05, [0.10, 0.11, 0.13], 0, MAT.FLAT);
       }
     }
     if (s === 0) {
       // The door, on the +Z face, with a plank texture implied by two boards.
-      put(0, 1.05, d / 2 + 0.08, 1.05, 2.0, 0.10, [0.16, 0.11, 0.07]);
-      put(-0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber);
-      put(0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber);
-      put(0, 2.12, d / 2 + 0.10, 1.35, 0.16, 0.30, pal.timber);   // lintel
+      put(0, 1.05, d / 2 + 0.08, 1.05, 2.0, 0.10, [0.16, 0.11, 0.07], 0, MAT.PLANK);
+      put(-0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber, 0, MAT.TIMBER);
+      put(0.22, 1.05, d / 2 + 0.13, 0.16, 1.9, 0.04, pal.timber, 0, MAT.TIMBER);
+      put(0, 2.12, d / 2 + 0.10, 1.35, 0.16, 0.30, pal.timber, 0, MAT.TIMBER);   // lintel
     }
   }
 
@@ -139,10 +140,10 @@ export function buildHouse(spec) {
         spec.z + (ez * rd / 4) * cy,
       ],
       yaw, pitch: ez * theta,
-      scale: [rw, 0.18, slabLen], albedo: pal.roof, radius: 0,
+      scale: [rw, 0.18, slabLen], albedo: pal.roof, tex: MAT.SLATE, radius: 0,
     });
   }
-  put(0, ridgeH + 0.06, 0, rw + 0.14, 0.20, 0.30, pal.roof);      // ridge cap
+  put(0, ridgeH + 0.06, 0, rw + 0.14, 0.20, 0.30, pal.roof, 0, MAT.SLATE);   // ridge cap
 
   // The gable triangles, approximated by four stacked courses. A single box
   // would be a rectangle, which is exactly what was wrong before.
@@ -174,12 +175,12 @@ export function buildHouse(spec) {
 export function buildWell(x, z, ground) {
   const stone = [0.32, 0.31, 0.29], wood = [0.19, 0.14, 0.09], roof = [0.15, 0.14, 0.15];
   return [
-    { pos: [x, ground + 0.45, z], yaw: 0.4, pitch: 0, scale: [2.2, 0.9, 2.2], albedo: stone, radius: 1.2 },
+    { pos: [x, ground + 0.45, z], yaw: 0.4, pitch: 0, scale: [2.2, 0.9, 2.2], albedo: stone, tex: MAT.COBBLE, radius: 1.2 },
     { pos: [x, ground + 0.95, z], yaw: 0.4, pitch: 0, scale: [1.7, 0.2, 1.7], albedo: [0.12, 0.13, 0.15] },
-    { pos: [x - 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood },
-    { pos: [x + 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood },
-    { pos: [x, ground + 2.9, z - 0.55], yaw: 0, pitch: 0.7, scale: [2.4, 0.12, 1.5], albedo: roof },
-    { pos: [x, ground + 2.9, z + 0.55], yaw: 0, pitch: -0.7, scale: [2.4, 0.12, 1.5], albedo: roof },
+    { pos: [x - 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood, tex: MAT.TIMBER },
+    { pos: [x + 0.85, ground + 1.9, z], yaw: 0, pitch: 0, scale: [0.18, 2.0, 0.18], albedo: wood, tex: MAT.TIMBER },
+    { pos: [x, ground + 2.9, z - 0.55], yaw: 0, pitch: 0.7, scale: [2.4, 0.12, 1.5], albedo: roof, tex: MAT.SLATE },
+    { pos: [x, ground + 2.9, z + 0.55], yaw: 0, pitch: -0.7, scale: [2.4, 0.12, 1.5], albedo: roof, tex: MAT.SLATE },
     { pos: [x, ground + 2.55, z], yaw: 0, pitch: 0, scale: [1.9, 0.14, 0.16], albedo: wood },
     { pos: [x, ground + 1.65, z], yaw: 0.3, pitch: 0, scale: [0.4, 0.42, 0.4], albedo: [0.32, 0.22, 0.14] },
   ];
@@ -191,9 +192,9 @@ export function buildStall(x, z, ground, yaw, seed = 0) {
   const wood = [0.23, 0.16, 0.10];
   const cloth = rng.pick([[0.38, 0.12, 0.11], [0.14, 0.19, 0.31], [0.40, 0.33, 0.15]]);
   const cy = Math.cos(yaw), sy = Math.sin(yaw);
-  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0, radius = 0) => ({
+  const put = (lx, ly, lz, sx, sh, sz, albedo, pitch = 0, radius = 0, tex = MAT.PLANK) => ({
     pos: [x + lx * cy + lz * sy, ground + ly, z - lx * sy + lz * cy],
-    yaw, pitch, scale: [sx, sh, sz], albedo, radius,
+    yaw, pitch, scale: [sx, sh, sz], albedo, radius, tex,
   });
   const out = [
     put(0, 0.55, 0, 2.6, 0.16, 1.1, wood),
@@ -202,7 +203,7 @@ export function buildStall(x, z, ground, yaw, seed = 0) {
   for (const ex of [-1, 1]) for (const ez of [-1, 1]) {
     out.push(put(ex * 1.2, 1.1, ez * 0.5, 0.10, 2.2, 0.10, wood));
   }
-  out.push(put(0, 2.28, 0, 2.9, 0.10, 1.5, cloth, 0.18));
+  out.push(put(0, 2.28, 0, 2.9, 0.10, 1.5, cloth, 0.18, 0, MAT.CLOTH));
   // Goods on the counter, because an empty stall reads as scenery.
   for (let i = 0; i < 4; i++) {
     out.push(put(-0.9 + i * 0.6, 0.75, rng.range(-0.2, 0.2), 0.3, 0.24, 0.3,

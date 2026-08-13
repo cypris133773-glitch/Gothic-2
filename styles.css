@@ -132,3 +132,25 @@ html, body {
 #died ul { list-style: none; color: #b9ad92; font-size: 14px; line-height: 2; }
 #died ul b { color: #c8a45c; margin-right: 10px; }
 @keyframes died-in { from { opacity: 0; } 40% { opacity: 0; } to { opacity: 1; } }
+
+/* The title screen. Ink on black, one column, no art — the world behind it is
+   the art, and it is already rendering. */
+#title {
+  position: fixed; inset: 0; z-index: 11;
+  display: grid; place-content: center; gap: 18px; text-align: center;
+  padding: 24px;
+  background: radial-gradient(ellipse at center, rgba(12, 10, 8, 0.82), rgba(3, 3, 4, 0.96));
+}
+#title[hidden] { display: none; }
+#title h1 {
+  font-size: 34px; font-weight: 400; letter-spacing: 0.42em;
+  color: #c8a45c; text-indent: 0.42em;
+}
+#title-sub { color: #6e6552; font-size: 12px; letter-spacing: 0.10em; }
+#title-menu { list-style: none; margin: 8px 0; }
+#title-menu li { padding: 6px 0; color: #b9ad92; font-size: 15px; }
+#title-menu li b { color: #c8a45c; margin-right: 12px; }
+#title-menu li.off { color: #55503f; }
+#title-menu li.off b { color: #55503f; }
+#title-keys { color: #6e6552; font-size: 12px; line-height: 1.9; margin-top: 6px; }
+#title-keys b { color: #8a8171; font-weight: 400; }

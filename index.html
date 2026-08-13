@@ -20,6 +20,20 @@
 
 <div id="overlay"></div>
 
+<!-- The title screen. It is also where the audio context gets its gesture, so
+     the game is never silent-and-confusing on the first key. -->
+<div id="title" hidden>
+  <h1>GRIMWARD</h1>
+  <p id="title-sub">An open-world action RPG in the 2003 German tradition</p>
+  <ul id="title-menu"></ul>
+  <div id="title-keys">
+    <div><b>W A S D</b> move · <b>Shift</b> walk · <b>Ctrl</b> sneak · <b>Space</b> jump</div>
+    <div><b>F</b> attack or shoot · <b>G</b> block · <b>R</b> cast · <b>E</b> talk · <b>T</b> train</div>
+    <div><b>C</b> character · <b>I</b> pack · <b>J</b> log · <b>K</b> runes · <b>L</b> pick a lock · <b>P</b> a pocket</div>
+    <div><b>F5</b> save · <b>F9</b> load · <b>M</b> mute · <b>F3</b> overlay</div>
+  </div>
+</div>
+
 <!-- The one loading screen in the game, and it is at the one place where there
      is genuinely another world to load: the pass. Everything on the island
      streams, so this never appears while walking. -->

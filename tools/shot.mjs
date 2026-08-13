@@ -130,6 +130,8 @@ const SCENES = LINEUP
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]
   : [
+      // The title, over a city that is already rendering behind it.
+      { name: 'title', time: 8.5, extra: '&menu=1' },
       { name: 'morning', time: 9 },
       { name: 'noon', time: 12.5 },
       { name: 'dusk', time: 18.4 },

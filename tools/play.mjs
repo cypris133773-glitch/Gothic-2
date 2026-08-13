@@ -132,6 +132,21 @@ async function main() {
     const err = await page.evaluate('window.GRIMWARD.error || null');
     ok('boot raised no error', !err, err || '');
 
+    // --- the title screen ---------------------------------------------------
+    // The harness starts a game the way a player does, because a menu nothing
+    // ever presses is a menu that breaks without anybody noticing.
+    const titled = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the game opens on a title screen', titled.title);
+    ok('and does not simulate behind it',
+      await page.evaluate('(() => { const a = window.GRIMWARD.world.ticks; return new Promise((r) => setTimeout(() => r(window.GRIMWARD.world.ticks === a), 400)); })()'));
+
+    await page.keyDown('Digit1'); await page.keyUp('Digit1');
+    await sleep(250);
+    const begun = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('1 begins the game', !begun.title);
+    ok('and the world starts running',
+      await page.evaluate('(() => { const a = window.GRIMWARD.world.ticks; return new Promise((r) => setTimeout(() => r(window.GRIMWARD.world.ticks > a), 400)); })()'));
+
     await page.waitFor('window.GRIMWARD.frames > 20', { what: 'twenty rendered frames' });
     const first = await page.evaluate('window.GRIMWARD.probeState()');
     ok('the renderer is drawing the world', first.drawCalls > 5 && first.triangles > 1000,
@@ -223,8 +238,13 @@ async function main() {
       '(() => { const s = window.GRIMWARD.probeState(); return s.onGround && s.combat.state === 0; })()',
       { what: 'the character to settle before swinging', timeout: 4000 },
     );
+    // Four hundred milliseconds, not one hundred and twenty. The renderer runs
+    // at about ten frames a second on a software rasteriser and input is
+    // sampled once per rendered frame, so a 120 ms hold is *one frame* and
+    // sometimes zero. The check failed about one run in five reporting state 0,
+    // which reads exactly like a broken attack key and is a broken stopwatch.
     await page.keyDown('KeyF');
-    await sleep(120);
+    await sleep(400);
     const swinging = await page.evaluate('window.GRIMWARD.probeState().combat');
     await page.keyUp('KeyF');
     ok('F starts a swing', swinging.state === 1 || swinging.state === 2 || swinging.state === 3,
@@ -382,7 +402,7 @@ async function main() {
     // key that goes down and up inside one frame was never held at all — which
     // is true of a real keyboard too and is why this is a hold.
     await page.keyDown('KeyF');
-    await sleep(180);
+    await sleep(400);
     const drawing = await page.evaluate('window.GRIMWARD.probeState()');
     await page.keyUp('KeyF');
     ok('F draws the bow', drawing.bow.drawing > 0, `${drawing.bow.drawing} frames left`);

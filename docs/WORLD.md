@@ -192,6 +192,29 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## The day
+
+Everybody in the city stood on the same square metre from the moment the world
+was built, including at three in the morning. They have days now, and a routine
+here is deliberately the cheap version of the idea:
+
+- **A routine is a list of hours and places.** "At the anvil from six, in the
+  tavern from half seven, home at eleven." They walk there, at walking pace, on
+  foot, through the same collision as everything else.
+- **It is a clock, not a script.** Where somebody should be is a function of the
+  hour alone — no state machine, nothing for a save to store, and nobody a
+  conversation can desynchronise.
+- **It does not wrap.** A night shift is written twice, once at 22:30 and once
+  at 00:00. A day you have to spell out completely is a day with no holes in
+  it, and the version that wrapped silently walked the gate guard back to his
+  post at one minute past midnight.
+
+The nicest thing about it is a consequence nobody designed: the guard on the
+*upper* gate is relieved at night, so there is a window when nobody is turning
+strangers away — while the land gate, which is the city's only way in, is
+manned at four in the morning. The upper gate is still shut, because a door in
+this game is geometry rather than a man.
+
 ## Sound
 
 There are no audio files in this project and there are not going to be: the

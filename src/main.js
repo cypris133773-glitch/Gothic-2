@@ -181,6 +181,7 @@ async function boot() {
       pendingTravel: world.pendingTravel,
       dead: world.dead, deadFor: world.deadFor,
       sound: { on: sound.enabled, muted: sound.muted },
+      title: atTitle,
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
@@ -241,6 +242,53 @@ async function boot() {
   api.save = save; api.load = load;
 
   // --- conversations ---------------------------------------------------------
+  // --- the title screen ---------------------------------------------------------
+  //
+  // Shown over a world that is already rendering, because the world *is* the
+  // art and there is nothing to load. It is also where the audio context gets
+  // its gesture, so the game is never silently confusing on the first key.
+  //
+  // `?menu=0` skips it, which is how every harness in this repo starts a game
+  // without knowing the menu exists.
+  const titleEl = document.getElementById('title');
+  const menuEl = document.getElementById('title-menu');
+  // `?menu=0` skips it and `?menu=1` forces it, which is how the render gate
+  // photographs a menu that a probe run would otherwise never show.
+  let atTitle = params.get('menu') === '1'
+    || (params.get('menu') !== '0' && !params.has('probe') && !params.has('lineup'));
+
+  async function renderTitle() {
+    // Shown *first*, filled in second. Listing the save slots opens IndexedDB,
+    // which can take a few hundred milliseconds — and the render gate captures
+    // its frame long before that, so an await before the reveal photographs an
+    // empty screen and reports the menu as missing.
+    titleEl.hidden = !atTitle;
+    if (!atTitle) return;
+    const slots = await storage.list().catch(() => []);
+    if (!atTitle) return;               // begun while we were asking
+    const rows = [
+      ['1', 'Begin', true],
+      ['2', 'Continue where you left off', slots.includes('auto')],
+      ['3', 'Load your last manual save', slots.includes('manual')],
+    ];
+    menuEl.replaceChildren(...rows.map(([key, label, on2]) => {
+      const li = document.createElement('li');
+      if (!on2) li.className = 'off';
+      const b = document.createElement('b');
+      b.textContent = key;
+      li.append(b, document.createTextNode(label));
+      return li;
+    }));
+  }
+
+  function leaveTitle() {
+    atTitle = false;
+    titleEl.hidden = true;
+    // The clock only starts once somebody is playing, so a title screen left
+    // open all afternoon does not put the player down at dusk.
+    lastFrame = performance.now();
+  }
+
   // --- death ------------------------------------------------------------------
   const diedEl = document.getElementById('died');
   const diedWhere = document.getElementById('died-where');
@@ -457,6 +505,14 @@ async function boot() {
   addEventListener('keydown', (e) => {
     if (e.code === 'F3') { overlay.toggle(); return; }
 
+    // The title takes the keyboard before anything else does.
+    if (atTitle) {
+      if (e.code === 'Digit1') { leaveTitle(); return; }
+      if (e.code === 'Digit2') { load('auto').then(leaveTitle); return; }
+      if (e.code === 'Digit3') { load('manual').then(leaveTitle); return; }
+      return;
+    }
+
     // Death takes the keyboard. Nothing else is offered because nothing else
     // is available: you load, or you wake up somewhere else and poorer.
     if (world.dead) {
@@ -590,6 +646,7 @@ async function boot() {
   }
 
   let last = performance.now();
+  let lastFrame = last;
   let acc = 0;
 
   function frame(now) {
@@ -603,7 +660,9 @@ async function boot() {
     // whenever a frame ran long, and turn twice as far for it.
     const intent = off.has('input') ? idleIntent() : input.sample(dt / 1000);
 
-    acc += dt;
+    // The world is drawn behind the title screen and *not* stepped: a menu left
+    // open all afternoon must not put the player down at dusk with a day gone.
+    acc += atTitle ? 0 : dt;
     let ticks = 0;
     while (acc >= TICK_MS && ticks < 8) {   // a hard cap: never spiral
       world.tick(TICK_MS / 1000, intent);
@@ -683,6 +742,13 @@ async function boot() {
       });
     }
   }
+  // Called here, at the end of boot, and not beside `window.GRIMWARD = api`.
+  // `renderTitle` is async, so a `let atTitle` it cannot see yet throws a
+  // ReferenceError *into a promise nobody is awaiting* — no boot error, no
+  // title, and a screenshot that simply shows the city. Async functions swallow
+  // their own temporal dead zone, which is a good reason to call them late.
+  api.leaveTitle = leaveTitle;
+  renderTitle();
   requestAnimationFrame(frame);
 }
 

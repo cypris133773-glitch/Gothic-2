@@ -20,6 +20,7 @@ import { REGIONS } from '../src/world/regions.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED, resolveObstacles } from '../src/game/player.js';
 import { KITS, poseHumanoid, kitForArmour } from '../src/game/rig.js';
+import { postAt, DAYS, stepRoutine } from '../src/game/routine.js';
 import {
   S, WEAPONS, createFighter, stepFighter, resolveStrike, comboLimit,
   PARRY_TICKS, PARRY_STAGGER, STAGGER_TICKS, MIN_TELEGRAPH, WHIFF_RECOVERY,
@@ -1225,6 +1226,88 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(!early.won, `a level-${early.level} character cleared the lighthouse — it is not a wall`);
   const ready = run(30000, 50, 70, 'forged_blade', 'watch_mail');
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
+});
+
+// --- the day ------------------------------------------------------------------
+
+check('a routine is a clock, not a script', () => {
+  // Where somebody should be is a function of the hour alone: no state
+  // machine, nothing to save, and a person you followed for two days behaves
+  // the same on the second one.
+  const day = DAYS.tradesman([0, 0], [1, 0], [10, 10], [20, 20]);
+  eq(postAt(day, 3).at[0], 20, 'asleep at three in the morning');
+  eq(postAt(day, 9).at[0], 0, 'at the anvil at nine');
+  eq(postAt(day, 21).at[0], 10, 'in the tavern at nine at night');
+  eq(postAt(day, 23.5).at[0], 20, 'home again before midnight');
+
+  // A night shift has to be written twice, because `postAt` does not wrap.
+  // The first version wrote it once and walked the gate guard back to his post
+  // at one minute past midnight.
+  const watch = DAYS.watch([0, 0], [1, 0], [50, 50]);
+  eq(postAt(watch, 0.1).at[0], 50, 'the night guard went back to work at midnight');
+  eq(postAt(watch, 23).at[0], 50, 'and was not relieved at all');
+  eq(postAt(watch, 12).at[0], 0, 'and never turned up in the day');
+});
+
+check('the town is somewhere different at three in the morning', () => {
+  // The whole value of the system in one assertion: run the same world at four
+  // hours and check that people are not standing where they were.
+  const settle = (hour) => {
+    const w = createWorld({ seed: 1, hour, props: 10, beasts: 0, foes: false });
+    for (let i = 0; i < 60 * 200; i++) w.tick(1 / 60);
+    return new Map(w.people.map((p) => [p.id, [p.pos[0], p.pos[2]]]));
+  };
+  const morning = settle(9);
+  const evening = settle(20);
+  const night = settle(3);
+
+  const moved = (a, b, id) => {
+    const p = a.get(id), q = b.get(id);
+    return Math.hypot(p[0] - q[0], p[1] - q[1]);
+  };
+  // The smith is at his anvil at nine, in the tavern at eight, and at home at
+  // three — three different places, none of them within shouting distance.
+  assert(moved(morning, evening, 'npc3') > 8, `the smith never left the forge: ${moved(morning, evening, 'npc3').toFixed(1)} m`);
+  assert(moved(evening, night, 'npc3') > 8, `the smith slept in the tavern: ${moved(evening, night, 'npc3').toFixed(1)} m`);
+
+  // And the tavern actually fills: four people within a few metres of it at
+  // eight in the evening, and not at nine in the morning.
+  const near = (at, x, z, r) => [...at.values()].filter((p) => Math.hypot(p[0] - x, p[1] - z) < r).length;
+  assert(near(evening, -9, -13, 6) >= 3, `${near(evening, -9, -13, 6)} people in the tavern at eight`);
+  assert(near(morning, -9, -13, 6) <= 1, `${near(morning, -9, -13, 6)} people in the tavern at nine in the morning`);
+
+  // Nobody piles up. Four people given the same seat read as one very wide man.
+  const seats = [...evening.values()];
+  for (let i = 0; i < seats.length; i++) {
+    for (let j = i + 1; j < seats.length; j++) {
+      const d = Math.hypot(seats[i][0] - seats[j][0], seats[i][1] - seats[j][1]);
+      assert(d > 0.7, `two people are standing ${d.toFixed(2)} m apart in the tavern`);
+    }
+  }
+});
+
+check('the land gate is never left unattended and the upper gate is', () => {
+  // A deliberate asymmetry, and one of the few pieces of emergent design here:
+  // the city has one way in and somebody is on it at four in the morning, but
+  // the guard on the *upper* quarter is relieved — so there is a window when
+  // nobody is turning strangers away. The door is still shut, because the door
+  // is geometry rather than a man.
+  const at = (hour, id) => {
+    const w = createWorld({ seed: 1, hour, props: 10, beasts: 0, foes: false });
+    for (let i = 0; i < 60 * 200; i++) w.tick(1 / 60);
+    const p = w.people.find((x) => x.id === id);
+    return { pos: [p.pos[0], p.pos[2]], world: w };
+  };
+  const landGate = createWorld({ seed: 1, props: 0, beasts: false, foes: false }).gates.land;
+  const nightWatch = at(3, 'npc5');
+  assert(Math.hypot(nightWatch.pos[0] - landGate[0], nightWatch.pos[1] - landGate[1]) < 8,
+    'the land gate was left open at three in the morning');
+
+  const upper = at(3, 'npc0');
+  const upperGate = nightWatch.world.gates.upper;
+  assert(Math.hypot(upper.pos[0] - upperGate[0], upper.pos[1] - upperGate[1]) > 8,
+    'the upper gate guard never sleeps');
+  assert(!upper.world.doorOpen('upper'), 'and the gate opened because he left');
 });
 
 // --- sound --------------------------------------------------------------------

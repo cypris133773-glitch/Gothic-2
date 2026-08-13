@@ -37,6 +37,7 @@ import {
 import {
   createChest, pick, abandonPick, canSee, canPickPocket, LOCK_TICKS,
 } from '../game/theft.js';
+import { stepRoutine, postAt, DAYS } from '../game/routine.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
@@ -289,41 +290,71 @@ function makePeople(terrain, seed) {
   const upperGate = gatePoint(CITY.upper.at[0], CITY.upper.at[1], CITY.upper.rx, CITY.upper.rz, CITY.upper.gate);
   const landGate = gatePoint(CITY.at[0], CITY.at[1], CITY.wall.rx, CITY.wall.rz, CITY.gates.land);
 
+  // Where a day happens. Named so that a routine reads as a sentence rather
+  // than as coordinates: "at the anvil until seven, then the tavern".
+  // Seats, not a building. Four people given the same point stand inside each
+  // other and read as one very wide man.
+  const TAVERN = [
+    [-9.0, -13.0], [-11.2, -11.6], [-7.2, -11.2], [-10.4, -15.0], [-6.6, -14.6],
+  ];
+  const MARKET = [CITY.square[0], CITY.square[1]];
+  const BARRACKS = [12.0, -9.0];
+  const homes = [[-13.0, 9.5], [-11.5, 22.5], [11.0, 22.0], [16.0, 9.5], [8.5, 2.5]];
+
   const spec = [
     // npc0 — the guard on the upper gate. He paces across the opening and
     // turns strangers away; getting past him is the first act of the game.
+    // At night he is relieved and sleeps in the barracks, which is the one
+    // window in the game where the upper quarter is unwatched.
     { kit: 'guard', at: [upperGate[0] - 3.5, upperGate[1] + 1.5], look: [0, 6],
-      route: [[upperGate[0] - 3.5, upperGate[1] + 1.5], [upperGate[0] + 3.5, upperGate[1] + 1.5]], speed: 1.1 },
+      route: [[upperGate[0] - 3.5, upperGate[1] + 1.5], [upperGate[0] + 3.5, upperGate[1] + 1.5]], speed: 1.1,
+      day: DAYS.watch([upperGate[0] - 3.0, upperGate[1] + 1.5], [0, 6], BARRACKS) },
     // npc1 — Bosk, who does not live in the city. He waits at the fork outside
-    // the land gate, where the wood begins.
-    { kit: 'villager', at: [GATE_APRON[0] + 4.5, GATE_APRON[1] + 2.0], look: landGate, route: null },
-    { kit: 'villager', at: [CITY.square[0] - 3.2, CITY.square[1] - 2.4], look: CITY.square, route: null },
-    // npc3 — Harl, at his anvil in front of the smithy.
-    { kit: 'smith', at: [-6.0, 6.5], look: [-8, 1], route: null },
+    // the land gate, where the wood begins, and he does not come in at night.
+    { kit: 'villager', at: [GATE_APRON[0] + 4.5, GATE_APRON[1] + 2.0], look: landGate, route: null,
+      day: DAYS.fixed([GATE_APRON[0] + 4.5, GATE_APRON[1] + 2.0], landGate) },
+    { kit: 'villager', at: [CITY.square[0] - 3.2, CITY.square[1] - 2.4], look: CITY.square, route: null,
+      day: DAYS.townsfolk([MARKET[0] - 3.2, MARKET[1] - 2.4], TAVERN[0], homes[0]) },
+    // npc3 — Harl, at his anvil in front of the smithy. He drinks like a man
+    // who has been standing over a fire since six.
+    { kit: 'smith', at: [-6.0, 6.5], look: [-8, 1], route: null,
+      day: DAYS.tradesman([-6.0, 6.5], [-8, 1], TAVERN[1], homes[1]) },
     { kit: 'villager', at: [CITY.square[0] + 2.6, CITY.square[1] + 3.0], look: CITY.square,
-      route: [[3, 17], [-9, -4]], speed: 1.3 },
-    // The land gate, walked by two.
+      route: [[3, 17], [-9, -4]], speed: 1.3,
+      day: DAYS.townsfolk([MARKET[0] + 2.6, MARKET[1] + 3.0], TAVERN[2], homes[2]) },
+    // The land gate, walked by two, and *never* left unattended: the city has
+    // one way in and somebody is on it at four in the morning.
     { kit: 'guard', at: [landGate[0] - 4.0, landGate[1] - 3.0], look: [0, 40],
-      route: [[landGate[0] - 4.0, landGate[1] - 3.0], [landGate[0] + 4.0, landGate[1] - 3.0]], speed: 1.5 },
+      route: [[landGate[0] - 4.0, landGate[1] - 3.0], [landGate[0] + 4.0, landGate[1] - 3.0]], speed: 1.5,
+      day: DAYS.fixed([landGate[0] - 3.0, landGate[1] - 3.0], [0, 40]) },
     // The harbour: a porter between the two warehouses.
-    { kit: 'villager', at: [-17.5, -2.0], look: [-26, 0], route: [[-17.5, -6.0], [-17.5, 3.0]], speed: 1.2 },
+    { kit: 'villager', at: [-17.5, -2.0], look: [-26, 0], route: [[-17.5, -6.0], [-17.5, 3.0]], speed: 1.2,
+      day: DAYS.tradesman([-17.5, -2.0], [-26, 0], TAVERN[3], homes[3]) },
     // The barracks yard.
-    { kit: 'guard', at: [10.0, -8.0], look: [18, -7], route: null },
+    { kit: 'guard', at: [10.0, -8.0], look: [18, -7], route: null,
+      day: DAYS.watch([10.0, -8.0], [18, -7], BARRACKS) },
     // npc8 — Yorne, outside his tavern in the harbour quarter. He is the first
     // of the four ways past the upper gate and he is deliberately the one you
-    // find by wandering rather than by being sent.
-    { kit: 'villager', at: [-7.0, -14.5], look: [-12, -16], route: null },
+    // find by wandering rather than by being sent. He keeps the house, so he is
+    // the one person whose day is the opposite of everybody else's.
+    { kit: 'villager', at: [-7.0, -14.5], look: [-12, -16], route: null,
+      day: DAYS.fixed([-7.0, -14.5], [-12, -16]) },
     // npc9 — Captain Aldric, in the barracks. The Watch's door.
-    { kit: 'knight', at: [11.5, -4.0], look: [18, -7], route: null },
+    { kit: 'knight', at: [11.5, -4.0], look: [18, -7], route: null,
+      day: DAYS.watch([11.5, -4.0], [18, -7], BARRACKS) },
     // npc10 — Vessa, the alchemist, inside the upper quarter. You cannot reach
     // her without solving the gate, which is the point of putting her there.
-    { kit: 'villager', at: [-8.0, -21.0], look: [0, -22], route: null },
+    { kit: 'villager', at: [-8.0, -21.0], look: [0, -22], route: null,
+      day: DAYS.fixed([-8.0, -21.0], [0, -22]) },
     // npc11 — Brother Kelm, on the monastery shelf. The Chapter's door.
-    { kit: 'villager', at: [-18, -104], look: [-18, -118], route: null },
+    { kit: 'villager', at: [-18, -104], look: [-18, -118], route: null,
+      day: DAYS.fixed([-18, -104], [-18, -118]) },
     // npc12 — Sarn, at Hulder's farm. The Freeblades' door, out past the road.
-    { kit: 'guard', at: [58, -78], look: [64, -84], route: null },
+    { kit: 'guard', at: [58, -78], look: [64, -84], route: null,
+      day: DAYS.fixed([58, -78], [64, -84]) },
     // npc13 — Ossric, at the foot of his tower. The plot.
-    { kit: 'villager', at: [122, -98], look: [122, -104], route: null },
+    { kit: 'villager', at: [122, -98], look: [122, -104], route: null,
+      day: DAYS.fixed([122, -98], [122, -104]) },
   ];
 
   return dress(spec, terrain, rng, 'npc');
@@ -373,11 +404,24 @@ function dress(spec, terrain, rng, prefix) {
       speed: 0, phase: rng.range(0, Math.PI * 2),
       kit: KITS[s.kit], route: s.route, leg: 0, routeSpeed: s.speed || 1.4,
       pause: 0,
+      // A day, as a list of hours and places. Where somebody *should* be is a
+      // function of the clock alone — no state machine, nothing to save, and a
+      // person you followed for two days behaves the same on the second one.
+      routine: s.day || null,
     };
   });
 }
 
-function stepPerson(p, terrain, dt) {
+function stepPerson(p, terrain, dt, hour = 12) {
+  // A routine outranks a beat. If somebody is not where the hour says they
+  // should be, getting there is the only thing they are doing; once they are
+  // there, the beat they walk on their post takes over again. That ordering is
+  // what lets a gate guard pace all day and still go to bed.
+  if (p.routine && stepRoutine(p, hour, dt)) {
+    p.pos[1] = terrain.heightAt(p.pos[0], p.pos[2]);
+    advanceGait(p, dt);
+    return;
+  }
   if (p.route) {
     const target = p.route[p.leg];
     const dx = target[0] - p.pos[0], dz = target[1] - p.pos[2];
@@ -1721,7 +1765,7 @@ export function createWorld(opts = {}) {
       for (const b of beasts) b.pos[1] = terrain.heightAt(b.pos[0], b.pos[2]);
       for (const m of foes) m.pos[1] = terrain.heightAt(m.pos[0], m.pos[2]);
 
-      for (const p of people) stepPerson(p, terrain, dt);
+      for (const p of people) stepPerson(p, terrain, dt, clock.minutes / 60);
       world.checkQuests();
       stepCamera(camera, player, terrain, obstacles, dt);
       return this;

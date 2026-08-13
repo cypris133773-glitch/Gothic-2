@@ -465,6 +465,43 @@ export const DIALOGUE = {
       reply: 'Again. And again. And do not drop the shoulder.',
       effects: [{ kind: 'trainer', skill: 'oneHanded', max: 75, step: 5 }],
     },
+    // The Watch's own errand, and the reason a sworn man keeps coming back here.
+    {
+      id: 'aldric.order_ask',
+      when: (c) => c.guild === 'watch' && c.chapter >= 2 && !c.has('quest:q_order_watch:told'),
+      text: 'What does the Watch need?',
+      reply: 'We count ore at the land gate and not at the quay, and I did not write '
+        + 'that order. Find out who did. Ask at the harbour — porters see everything '
+        + 'and are asked nothing.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_order_watch', stage: 'told' }],
+    },
+    {
+      id: 'aldric.order_quay',
+      when: (c) => c.has('knows:quay_count') && c.has('quest:q_order_watch:told')
+        && !c.has('quest:q_order_watch:quay'),
+      text: 'The count was moved off the quay. A porter has been saying so for a year.',
+      reply: 'To *whom* has he been saying it. — He does not wait for an answer. '
+        + 'Four men could have moved it and I answer to two of them.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_order_watch', stage: 'quay' },
+        { kind: 'xp', amount: 350 },
+      ],
+    },
+    {
+      id: 'aldric.order_done',
+      when: (c) => c.has('quest:q_order_watch:quay') && c.has('met:ossric'),
+      text: 'The man on the plateau has been writing to the governor about it for a year.',
+      reply: 'Eleven times, and I saw four of them. — He is quiet for a moment. — '
+        + 'Then the answer is not who moved the count. It is who kept it moved.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_order_watch', stage: 'done' },
+        { kind: 'xp', amount: 600 },
+        { kind: 'gold', amount: 300 },
+      ],
+    },
     {
       id: 'aldric.lighthouse',
       when: (c) => c.guild === 'watch' && c.chapter >= 3 && !c.has('quest:q_lighthouse:told'),
@@ -559,6 +596,40 @@ export const DIALOGUE = {
       effects: [{ kind: 'quest', quest: 'q_tower', stage: 'told' }],
     },
     {
+      id: 'kelm.order_ask',
+      when: (c) => c.guild === 'ember' && c.chapter >= 2 && !c.has('quest:q_order_ember:told'),
+      text: 'What does the Chapter need of me?',
+      reply: 'A witness who is not a priest. We have read a year of shipping manifests '
+        + 'and the arithmetic is wrong in a way that frightens us, and nobody believes '
+        + 'a frightened priest.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_order_ember', stage: 'told' }],
+    },
+    {
+      id: 'kelm.order_shrine',
+      when: (c) => c.has('quest:q_order_ember:told') && !c.has('quest:q_order_ember:shrine'),
+      text: 'Witness to what?',
+      reply: 'There is a fire past the pass that was lit every evening for nine years '
+        + 'and has not been lit since the mine failed. Light it. Then come back and '
+        + 'tell me, in your own words, what it did.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_order_ember', stage: 'shrine' }],
+    },
+    {
+      id: 'kelm.order_done',
+      when: (c) => c.has('knows:shrine_lit') && c.has('quest:q_order_ember:shrine'),
+      text: 'It took before she had finished laying it. That is not how fire behaves.',
+      reply: '— He does not ask you to repeat it. — Nine years of somebody feeding it, '
+        + 'and a year of nobody. It is not the fire that was being fed. Go carefully '
+        + 'and do not go back there alone.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_order_ember', stage: 'done' },
+        { kind: 'xp', amount: 900 },
+        { kind: 'give', item: 'strong_draught', n: 3 },
+      ],
+    },
+    {
       id: 'kelm.other_guild',
       when: (c) => !!c.guild && c.guild !== 'ember',
       text: 'I have taken another oath.',
@@ -634,6 +705,41 @@ export const DIALOGUE = {
       effects: [{ kind: 'quest', quest: 'q_tower', stage: 'told' }],
     },
     {
+      id: 'sarn.order_ask',
+      when: (c) => c.guild === 'freeblade' && c.chapter >= 2 && !c.has('quest:q_order_freeblade:told'),
+      text: 'What is worth my time?',
+      reply: 'Somebody is moving more blackore than an army could use and paying nobody '
+        + 'a coin for it. I do not care who. I care *how much*, and where it is stacked.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_order_freeblade', stage: 'told' }],
+    },
+    {
+      id: 'sarn.order_counted',
+      when: (c) => c.has('quest:q_convoy:counted') && c.has('quest:q_order_freeblade:told')
+        && !c.has('quest:q_order_freeblade:counted'),
+      text: 'Forty-one loads east. None back.',
+      reply: 'Forty-one. — He says the number twice, quietly, the second time to '
+        + 'himself. — That is not a stockpile. That is somebody building something.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_order_freeblade', stage: 'counted' },
+        { kind: 'xp', amount: 400 },
+      ],
+    },
+    {
+      id: 'sarn.order_done',
+      when: (c) => c.has('quest:q_order_freeblade:counted') && c.has('knows:keep_hoard'),
+      text: 'It is all behind the keep\'s wall, and the men holding it were miners a year ago.',
+      reply: 'Then they are not holding it for themselves. Good. Men holding somebody '
+        + 'else\'s property can be reasoned with, and I am extremely reasonable.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_order_freeblade', stage: 'done' },
+        { kind: 'xp', amount: 700 },
+        { kind: 'gold', amount: 450 },
+      ],
+    },
+    {
       id: 'sarn.other_guild',
       when: (c) => !!c.guild && c.guild !== 'freeblade',
       text: 'I have taken another oath.',
@@ -689,6 +795,327 @@ export const DIALOGUE = {
     },
     { id: 'ossric.leave', text: 'I will come back.', reply: 'They all say that.', ends: true, priority: -100 },
   ],
+
+  // --- the people you pass ---------------------------------------------------
+  //
+  // Four short conversations, and they exist because the alternative was four
+  // people standing in the street who say nothing when you press E. A town
+  // where half the population is scenery is a town you stop pressing E in, and
+  // the rumours are how the chapter you are in gets *said* rather than shown in
+  // a corner of the screen.
+
+  market_woman: [
+    {
+      id: 'market.greet',
+      text: 'Good morning.',
+      reply: 'It is, and it will be until the ore wagons are late again.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:market' }],
+    },
+    {
+      id: 'market.city',
+      when: (c) => c.has('met:market'),
+      text: 'Who runs this city?',
+      reply: 'The governor runs the upper quarter and the Watch runs the rest. '
+        + 'The harbour runs itself and everyone pretends not to notice.',
+      once: true,
+    },
+    {
+      id: 'market.ch2',
+      when: (c) => c.has('met:market') && c.chapter >= 2,
+      text: 'Everyone is recruiting.',
+      reply: 'Everyone is *frightened*. Recruiting is what frightened men do with '
+        + 'their hands.',
+      once: true,
+    },
+    {
+      id: 'market.ch3',
+      when: (c) => c.has('met:market') && c.chapter >= 3,
+      text: 'They have opened the road east.',
+      reply: 'My husband walked that road for nine years. He would not walk it now '
+        + 'for the governor\'s own purse.',
+      once: true,
+    },
+    { id: 'market.leave', text: 'Good day.', reply: 'And to you.', ends: true, priority: -100 },
+  ],
+
+  street_villager: [
+    {
+      id: 'street.greet',
+      text: 'You live here?',
+      reply: 'All my life, and I have been up that hill twice. Both times for a funeral.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:street' }],
+    },
+    {
+      id: 'street.upper',
+      when: (c) => c.has('met:street') && !c.has('pass:upper'),
+      text: 'How does a man get up the hill without dying first?',
+      reply: 'He carries something for somebody who lives there. Ask at the tavern — '
+        + 'Yorne carries half the upper quarter\'s post and hates every step of it.',
+      once: true,
+      effects: [{ kind: 'flag', flag: 'knows:yorne_letter' }],
+    },
+    {
+      id: 'street.after',
+      when: (c) => c.has('pass:upper'),
+      text: 'I have been up the hill.',
+      reply: 'Then you have seen more of this city than I have. Was it worth it?',
+      once: true,
+    },
+    { id: 'street.leave', text: 'Mind how you go.', reply: 'Always do.', ends: true, priority: -100 },
+  ],
+
+  harbour_porter: [
+    {
+      id: 'porter.greet',
+      text: 'Busy?',
+      reply: 'Two ships this week where there were six. Ask the warehouse men what '
+        + 'that does to a wage.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:porter' }],
+    },
+    {
+      id: 'porter.ore',
+      when: (c) => c.has('met:porter') && c.has('knows:ore_theft'),
+      text: 'Ore is going missing on the roads.',
+      reply: 'It is going missing off the *quay*, and the Watch counts it at the gate '
+        + 'and not at the water. Somebody arranged that.',
+      once: true,
+      effects: [{ kind: 'flag', flag: 'knows:quay_count' }],
+    },
+    {
+      id: 'porter.quay',
+      when: (c) => c.has('knows:quay_count') && c.chapter >= 2,
+      text: 'Who arranged it?',
+      reply: 'A man who can tell the Watch where to stand. There are four of those '
+        + 'in this city and they all live up the hill.',
+      once: true,
+    },
+    { id: 'porter.leave', text: 'Good luck with the wage.', reply: 'It will want more than luck.', ends: true, priority: -100 },
+  ],
+
+  yard_guard: [
+    {
+      id: 'yard.greet',
+      text: 'This is the training yard?',
+      reply: 'It is where the captain finds out who is lying. Do not stand in the '
+        + 'middle of it.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:yard' }],
+    },
+    {
+      id: 'yard.aldric',
+      when: (c) => c.has('met:yard') && !c.guild,
+      text: 'What does Aldric want from a man?',
+      reply: 'Somebody who will speak for him, and twenty per cent of a sword. '
+        + 'He will not say the second one until you have the first.',
+      once: true,
+    },
+    {
+      id: 'yard.sworn',
+      when: (c) => c.guild === 'watch',
+      text: 'Anything to do?',
+      reply: 'Stand where you are told and hit what the captain points at. '
+        + 'It is not complicated and it is not safe.',
+    },
+    { id: 'yard.leave', text: 'Carry on.', reply: 'Move along.', ends: true, priority: -100 },
+  ],
+
+  // --- past the pass ---------------------------------------------------------
+  //
+  // Four people in a valley that once held eighty, and every one of them tells
+  // you where the rest went. The valley's whole story is that it is *emptied*,
+  // and emptiness has to be spoken by somebody or it reads as unfinished.
+
+  // Brant, who runs what is left of the camp.
+  brant_camp: [
+    {
+      id: 'brant.greet',
+      text: 'Somebody is still here.',
+      reply: 'Four of us. There were eighty. Say what you came to say and then '
+        + 'tell me how the road was, because nobody walks it any more.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:brant' }],
+    },
+    {
+      id: 'brant.what_happened',
+      when: (c) => c.has('met:brant'),
+      text: 'Where did eighty men go?',
+      reply: 'Into the pits, mostly, and then not out of them. The rest walked '
+        + 'east and got behind that wall, and none of those have come out either.',
+      once: true,
+      effects: [{ kind: 'flag', flag: 'knows:camp_emptied' }],
+    },
+    {
+      id: 'brant.convoy_ask',
+      when: (c) => c.has('knows:camp_emptied') && !c.has('quest:q_convoy:told'),
+      text: 'And the ore keeps leaving.',
+      reply: 'Every eight days, and not one coin comes back for it. Find out who '
+        + 'is carting it and I will tell you everything I have not told you yet.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_convoy', stage: 'told' }],
+    },
+    {
+      id: 'brant.convoy_done',
+      when: (c) => c.has('quest:q_convoy:counted'),
+      text: 'It all goes to the keep, and none of it comes back out.',
+      reply: 'Then they are not selling it. They are *using* it, and there is only '
+        + 'one thing you use that much blackore for. — He does not say what.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_convoy', stage: 'done' },
+        { kind: 'xp', amount: 700 },
+        { kind: 'gold', amount: 200 },
+        { kind: 'flag', flag: 'knows:keep_hoard' },
+      ],
+    },
+    {
+      id: 'brant.keep',
+      when: (c) => c.has('knows:keep_hoard') && c.chapter >= 4 && !c.has('quest:q_keep:told'),
+      text: 'Then I am going in there.',
+      reply: 'You will need the gate opened and I cannot open it. What I can do '
+        + 'is not be here when it goes wrong.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_keep', stage: 'told' }],
+    },
+    {
+      id: 'brant.trade',
+      when: (c) => c.has('met:brant'),
+      text: 'Have you anything to sell?',
+      reply: 'What eighty men left behind. Take it, it is doing nothing here.',
+      effects: [{ kind: 'trade', trader: 'brant_camp' }],
+    },
+    {
+      id: 'brant.train_ask',
+      when: (c) => c.has('met:brant') && !c.has('brant:offered'),
+      text: 'Can you teach me anything worth knowing?',
+      reply: 'How to be the last man standing in a place like this. Four hundred coin.',
+      once: true,
+      effects: [{ kind: 'flag', flag: 'brant:offered' }],
+    },
+    {
+      id: 'brant.train',
+      when: (c) => c.has('brant:offered') && c.gold >= 400,
+      text: 'Four hundred. Teach me.',
+      reply: 'Never fight where you cannot leave. Now, the rest is with the blade.',
+      effects: [
+        { kind: 'gold', amount: -400 },
+        { kind: 'trainer', skill: 'oneHanded', max: 90, step: 5 },
+      ],
+    },
+    { id: 'brant.leave', text: 'Later.', reply: 'We will be here. Nowhere else to be.', ends: true, priority: -100 },
+  ],
+
+  // Hask, who is still working a pit nobody pays him for.
+  hask_miner: [
+    {
+      id: 'hask.greet',
+      text: 'You are still cutting.',
+      reply: 'It is the only thing I know how to do and the only thing here worth doing. '
+        + 'Mind the rim, it goes further down than it looks.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:hask' }],
+    },
+    {
+      id: 'hask.count',
+      when: (c) => c.has('quest:q_convoy:told') && c.has('met:hask'),
+      text: 'Who takes the ore away?',
+      reply: 'Men in mail with nothing on the mail. Eight days apart, every time, '
+        + 'and east every time — I have counted forty-one loads and not one has '
+        + 'come back down the road.',
+      once: true,
+      effects: [
+        { kind: 'quest', quest: 'q_convoy', stage: 'counted' },
+        { kind: 'xp', amount: 250 },
+      ],
+    },
+    {
+      id: 'hask.ore',
+      when: (c) => c.has('quest:q_shrine:told') && c.has('met:hask'),
+      text: 'Ulla wants ore from all three pits.',
+      reply: 'Then she will want it cut, not picked up. Here — this is the west drift\'s. '
+        + 'The other two you dig yourself, and the deep pit is not friendly.',
+      once: true,
+      effects: [{ kind: 'give', item: 'ore_west' }],
+    },
+    {
+      id: 'hask.trade',
+      when: (c) => c.has('met:hask'),
+      text: 'Do you buy anything?',
+      reply: 'I buy nothing. I will sell you a pick and a drink.',
+      effects: [{ kind: 'trade', trader: 'hask_miner' }],
+    },
+    { id: 'hask.leave', text: 'Good cutting.', reply: 'It is not, but thank you.', ends: true, priority: -100 },
+  ],
+
+  // Ulla, at the shrine.
+  ulla_shrine: [
+    {
+      id: 'ulla.greet',
+      text: 'Nine stones and a cold fire.',
+      reply: 'It was not cold when there were eighty of them. Somebody lit it every '
+        + 'evening and nobody could tell you why. Now nobody does and everybody can.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:ulla' }],
+    },
+    {
+      id: 'ulla.ask',
+      when: (c) => c.has('met:ulla') && !c.has('quest:q_shrine:told'),
+      text: 'What would light it again?',
+      reply: 'What put it out. Blackore from all three pits, in the pit\'s own hand — '
+        + 'not bought, not found. Cut.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_shrine', stage: 'told' }],
+    },
+    {
+      id: 'ulla.light',
+      when: (c) => c.has('quest:q_shrine:gathered'),
+      text: 'Three loads. One from each.',
+      reply: '— She does not thank you. She lays them in the pit and the fire takes '
+        + 'immediately, which is not how fire behaves, and she watches your face '
+        + 'while you notice.',
+      once: true,
+      effects: [
+        { kind: 'take', item: 'ore_west' },
+        { kind: 'take', item: 'ore_east' },
+        { kind: 'take', item: 'ore_deep' },
+        { kind: 'quest', quest: 'q_shrine', stage: 'done' },
+        { kind: 'xp', amount: 900 },
+        { kind: 'give', item: 'elixir_life' },
+        { kind: 'flag', flag: 'knows:shrine_lit' },
+      ],
+    },
+    {
+      id: 'ulla.after',
+      when: (c) => c.has('knows:shrine_lit'),
+      text: 'What did I just do?',
+      reply: 'You told the valley somebody is still here. Whether that was wise '
+        + 'depends entirely on what was listening.',
+    },
+    { id: 'ulla.leave', text: 'I will leave you to it.', reply: 'Everyone does.', ends: true, priority: -100 },
+  ],
+
+  // The watch on the camp's gate. Short, and the shortest thing in the game.
+  camp_watch: [
+    {
+      id: 'campwatch.greet',
+      text: 'Anything on the road?',
+      reply: 'Nothing walks up that road but you and things with four legs. '
+        + 'Keep it that way.',
+      once: true, priority: 100,
+      effects: [{ kind: 'flag', flag: 'met:campwatch' }],
+    },
+    {
+      id: 'campwatch.keep',
+      when: (c) => c.has('met:campwatch') && c.has('knows:keep_hoard'),
+      text: 'What is behind the keep\'s wall?',
+      reply: 'Men who were standing where I am standing a year ago. That is what '
+        + 'frightens me about it.',
+      once: true,
+    },
+    { id: 'campwatch.leave', text: 'Carry on.', reply: 'Always.', ends: true, priority: -100 },
+  ],
 };
 
 /**
@@ -701,11 +1128,24 @@ export const DIALOGUE = {
 export const SPEAKERS = {
   npc0: 'watch_gate',        // the gate of the upper quarter
   npc1: 'bosk_hunter',       // outside the land gate
+  npc2: 'market_woman',      // the market square
   npc3: 'harl_smith',        // the smithy, lower quarter
+  npc4: 'street_villager',   // walking the lower quarter
+  npc5: 'yard_guard',        // the land gate — the Watch's second man
+  npc6: 'harbour_porter',    // between the warehouses
+  npc7: 'yard_guard',        // the barracks yard
   npc8: 'yorne_tavern',      // the harbour
   npc9: 'aldric_captain',    // the barracks
   npc10: 'vessa_alchemist',  // the upper quarter
   npc11: 'kelm_chapter',     // the monastery
   npc12: 'sarn_freeblade',   // Hulder's farm
   npc13: 'ossric_tower',     // the plateau
+
+  // Past the pass. Valley people carry their own prefix so the two regions can
+  // never collide on an id — the island's npc0 and the valley's val0 are
+  // different people in different worlds.
+  val0: 'brant_camp',        // the camp
+  val1: 'hask_miner',        // the west drift
+  val2: 'ulla_shrine',       // the nine stones
+  val3: 'camp_watch',        // the camp's gate
 };

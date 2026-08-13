@@ -148,6 +148,98 @@ export const QUESTS = {
     order: ['told', 'done'],
   },
 
+  // --- past the pass -----------------------------------------------------------
+  q_convoy: {
+    title: 'Where the ore goes',
+    giver: 'Brant, at the camp',
+    chapter: 3,
+    stages: {
+      told: 'The pits are still being worked and the ore is still leaving. '
+        + 'Nobody at the camp is being paid for either. Find out who is taking it.',
+      counted: 'Hask has counted the loads. They go east, to the keep, and they '
+        + 'do not come back out.',
+      done: 'You know who is behind the keep\'s wall, and what they are paying with.',
+    },
+    order: ['told', 'counted', 'done'],
+  },
+
+  q_keep: {
+    title: 'The keep',
+    giver: 'Brant, at the camp',
+    chapter: 4,
+    stages: {
+      told: 'The keep is shut and the men who shut it have not opened it in a year.',
+      opened: 'The gate is open. Whatever is inside knows you are coming.',
+      done: 'The keep is yours. So is what it was hiding.',
+    },
+    order: ['told', 'opened', 'done'],
+  },
+
+  q_shrine: {
+    title: 'The nine stones',
+    giver: 'Ulla, at the shrine',
+    chapter: 3,
+    stages: {
+      told: 'Ulla keeps a fire that has not been lit since the mine failed. '
+        + 'She wants ore from all three pits to light it again.',
+      gathered: 'Three loads of blackore, one from each pit. Take them to her.',
+      done: 'The fire is lit. Something in the valley noticed.',
+    },
+    order: ['told', 'gathered', 'done'],
+  },
+
+  // --- what each order actually asks of you -------------------------------------
+  //
+  // Joining is not the content; being *used* is. Each order sends you to the
+  // same three places for different reasons, which is the cheapest way to make
+  // one map into three games — and the reason the guild you pick has to close
+  // two doors to mean anything.
+  q_order_watch: {
+    title: 'The captain\'s orders',
+    giver: 'Captain Aldric',
+    chapter: 2,
+    guild: 'watch',
+    stages: {
+      told: 'The Watch counts ore at the gate and not at the water. '
+        + 'Aldric wants to know who arranged that.',
+      quay: 'A porter says the count was moved by somebody who can tell the Watch '
+        + 'where to stand. Four men in the city can. All four live up the hill.',
+      done: 'Aldric has his answer, and does not thank you for it.',
+    },
+    order: ['told', 'quay', 'done'],
+  },
+
+  q_order_ember: {
+    title: 'What the Chapter is afraid of',
+    giver: 'Brother Kelm',
+    chapter: 2,
+    guild: 'ember',
+    stages: {
+      told: 'The Chapter has been reading the ore shipments for a year and does not '
+        + 'like the arithmetic. Kelm wants a witness who is not a priest.',
+      shrine: 'There is a fire in the valley that was lit every evening for nine '
+        + 'years and has not been lit since. Light it, and tell him what happens.',
+      done: 'Kelm knows what you saw. He was hoping to be wrong.',
+    },
+    order: ['told', 'shrine', 'done'],
+  },
+
+  q_order_freeblade: {
+    title: 'Sarn\'s arithmetic',
+    giver: 'Sarn',
+    chapter: 2,
+    guild: 'freeblade',
+    stages: {
+      told: 'Somebody is moving more ore than an army could use and paying nobody '
+        + 'for it. Sarn wants to know what is at the other end, and how much of it '
+        + 'there is.',
+      counted: 'Forty-one loads east, none back. Whatever is behind the keep\'s wall '
+        + 'has a year of blackore in it.',
+      done: 'Sarn has his number. He is already deciding what to do about it.',
+    },
+    order: ['told', 'counted', 'done'],
+  },
+
   q_lighthouse: {
     title: 'The light on the headland',
     giver: 'Captain Aldric',

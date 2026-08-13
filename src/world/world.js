@@ -313,10 +313,46 @@ function makePeople(terrain, seed) {
     { kit: 'villager', at: [122, -98], look: [122, -104], route: null },
   ];
 
+  return dress(spec, terrain, rng, 'npc');
+}
+
+/**
+ * The people of the Cleft valley.
+ *
+ * Four of them, and there are four for a reason: the valley is meant to feel
+ * emptied rather than populated. A camp that once held eighty men has a foreman,
+ * a miner, a guard on the gate and one woman who will not leave the shrine, and
+ * every one of them will tell you where everybody else went.
+ */
+function makeValleyPeople(terrain, seed) {
+  const rng = makeRng(seed * 15485863 + 11);
+  const P = terrain.places;
+  const spec = [
+    // val0 — Brant, who runs what is left of the camp.
+    { kit: 'freeblade', at: [P.camp.at[0] - 2, P.camp.at[1] - 2], look: [P.camp.at[0], P.camp.at[1] + 20], route: null },
+    // val1 — Hask, still working a pit nobody is paying him for.
+    { kit: 'villager', at: [P.pit_one.at[0] + 6, P.pit_one.at[1] + 16], look: P.pit_one.at, route: null },
+    // val2 — Ulla, at the shrine, who has been here longer than the mine.
+    { kit: 'ember', at: [P.shrine.at[0], P.shrine.at[1] + 5], look: P.shrine.at, route: null },
+    // val3 — the watch on the camp's gate, walking the gap in the palisade.
+    { kit: 'guard', at: [P.camp.at[0], P.camp.at[1] + 17], look: [P.camp.at[0], P.camp.at[1] + 40],
+      route: [[P.camp.at[0] - 4, P.camp.at[1] + 17], [P.camp.at[0] + 4, P.camp.at[1] + 17]], speed: 1.1 },
+  ];
+  return dress(spec, terrain, rng, 'val');
+}
+
+/**
+ * Turn a list of positions into people.
+ *
+ * Shared by both regions, because a person is a person: what differs between
+ * the island and the valley is who is standing where, not what standing
+ * somewhere means.
+ */
+function dress(spec, terrain, rng, prefix) {
   return spec.map((s, i) => {
     const [x, z] = s.at;
     return {
-      id: `npc${i}`,
+      id: `${prefix}${i}`,
       pos: new Float32Array([x, terrain.heightAt(x, z), z]),
       // Idle people face whatever they have business with, plus a little jitter
       // so a street of them does not look like a firing squad.
@@ -430,7 +466,7 @@ export function createWorld(opts = {}) {
     : opts.people === false ? []
       // Only the island is populated. The valley's inhabitants are the reason
       // it is the valley, and they are not people.
-      : regionName === DEFAULT_REGION ? makePeople(terrain, seed) : [];
+      : regionName === DEFAULT_REGION ? makePeople(terrain, seed) : makeValleyPeople(terrain, seed);
 
   // Wolves, out past the fields. Nothing is placed on a road, on a pad or
   // inside the walls: the whole point of the design is that the road is safe
@@ -517,6 +553,17 @@ export function createWorld(opts = {}) {
       boxes: [],                 // the Cleft's barricade is scenery; see below
       opensOn: 'pass:cleft',
       at: cl,
+    });
+  }
+  // The keep's gate, in the valley. Same mechanism as the upper quarter's: a
+  // box in the opening, taken out of the world when there is a reason.
+  if (!opts.lineup && opts.town !== false && regionName === 'cleftvale') {
+    const k = terrain.places.keep.at;
+    const kg = [k[0], k[1] + 30];
+    doors.push({
+      name: 'keep',
+      boxes: buildDoor(kg[0], kg[1], terrain.heightAt(kg[0], kg[1]), Math.PI / 2, 6.0, 5.6),
+      opensOn: 'pass:keep',
     });
   }
   const doorBoxes = () => doors.filter((d) => !d.open).flatMap((d) => d.boxes);
@@ -895,6 +942,42 @@ export function createWorld(opts = {}) {
         if (Math.hypot(player.pos[0] - c2[0], player.pos[2] - c2[1]) < PLACES.cleft.r) {
           world.setQuest('q_cleft', 'done');
           world.awardXp(800, 'quest');
+        }
+      }
+
+      // --- the valley -----------------------------------------------------
+      //
+      // Ore is *cut*, not picked up: standing at a pit with the quest open is
+      // what gets it, which is the same rule the crates and the Cleft follow —
+      // a place in the world, reached on foot.
+      if (regionName === 'cleftvale' && flags.has('quest:q_shrine:told')) {
+        const pits = [['pit_one', 'ore_west'], ['pit_two', 'ore_east'], ['pit_three', 'ore_deep']];
+        for (const [place, id] of pits) {
+          const at = terrain.places[place].at;
+          if (has(inventory, id)) continue;
+          if (Math.hypot(player.pos[0] - at[0], player.pos[2] - at[1]) < 18) {
+            world.give(id);
+            world.awardXp(120, 'quest');
+          }
+        }
+        if (quests.get('q_shrine') === 'told'
+          && has(inventory, 'ore_west') && has(inventory, 'ore_east') && has(inventory, 'ore_deep')) {
+          world.setQuest('q_shrine', 'gathered');
+        }
+      }
+
+      // The keep opens for a man who knows what is inside it and has been sent.
+      // Two conditions, both earned, and the gate is geometry either way.
+      if (regionName === 'cleftvale' && flags.has('quest:q_keep:told') && !flags.has('pass:keep')) {
+        flags.add('pass:keep');
+        world.setQuest('q_keep', 'opened');
+      }
+      if (flags.has('pass:keep')) world.openDoor('keep');
+      if (regionName === 'cleftvale' && quests.get('q_keep') === 'opened') {
+        const k = terrain.places.keep.at;
+        if (Math.hypot(player.pos[0] - k[0], player.pos[2] - k[1]) < 12) {
+          world.setQuest('q_keep', 'done');
+          world.awardXp(1500, 'quest');
         }
       }
 

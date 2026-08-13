@@ -966,7 +966,9 @@ check('crossing the pass carries the man and leaves the world behind', () => {
   assert(n.flags.has('pass:upper'), 'what he had earned');
 
   // And the world is genuinely a different one.
-  assert(n.people.length === 0, 'the valley is populated by townspeople');
+  // The valley has its own four, and not one of them is from the island.
+  assert(n.people.every((p) => p.id.startsWith('val')), 'an islander came through the pass');
+  assert(!n.people.some((p) => w.people.some((q) => q.id === p.id)), 'the two regions share a person');
   assert(n.terrain.size !== w.terrain.size, 'both regions are the same size');
   assert(n.beasts.every((b) => b.valley), 'the valley kept the island\'s creatures');
   const islandWolf = w.beasts.find((b) => b.kind === 'wolf');
@@ -993,6 +995,136 @@ check('a save knows which world it is in, and refuses the wrong one', () => {
   let msg = '';
   try { bad.restore(data); } catch (e) { msg = e.message; }
   assert(/cleftvale/.test(msg), `expected a refusal naming the region, got "${msg}"`);
+});
+
+check('the valley can be played to the end of it', () => {
+  // The other half of the golden path, and the only proof the second region is
+  // a *game* rather than terrain: every stage reached by talking to somebody or
+  // standing somewhere, nothing set by hand.
+  const w = createWorld({ seed: 3, region: 'cleftvale', props: 40, beasts: 0 });
+  w.chapter = 4;
+  const P = w.terrain.places;
+
+  const say = (who, line) => {
+    const npc = w.people.find((p) => p.id === who);
+    assert(npc, `${who} is not in the valley`);
+    w.player.pos[0] = npc.pos[0]; w.player.pos[2] = npc.pos[2] - 1.5;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.player.yaw = 0;
+    const open = w.talk();
+    assert(open, `${who} would not talk`);
+    const i = open.options.findIndex((o) => o.id === line);
+    assert(i >= 0, `"${line}" was not on offer from ${who} — had ${open.options.map((o) => o.id).join(', ')}`);
+    w.dialogue.say(i);
+    w.dialogue.close();
+  };
+  const standAt = (place) => {
+    w.player.pos[0] = P[place].at[0]; w.player.pos[2] = P[place].at[1];
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.tick(1 / 60);
+  };
+
+  // Where the ore goes: told at the camp, counted at a pit, closed at the camp.
+  say('val0', 'brant.greet');
+  say('val0', 'brant.what_happened');
+  say('val0', 'brant.convoy_ask');
+  eq(w.quests.get('q_convoy'), 'told', 'Brant did not give the job');
+  say('val1', 'hask.greet');
+  say('val1', 'hask.count');
+  eq(w.quests.get('q_convoy'), 'counted', 'counting the loads changed nothing');
+  say('val0', 'brant.convoy_done');
+  eq(w.quests.get('q_convoy'), 'done', 'reporting back changed nothing');
+
+  // The nine stones: ore is cut at each pit by *being* there, not bought.
+  say('val2', 'ulla.greet');
+  say('val2', 'ulla.ask');
+  say('val1', 'hask.ore');
+  assert(w.carrying('ore_west'), 'Hask kept the west drift\'s ore');
+  assert(!w.carrying('ore_east'), 'the east drift\'s ore arrived without going there');
+  standAt('pit_two');
+  standAt('pit_three');
+  assert(w.carrying('ore_east') && w.carrying('ore_deep'), 'standing at a pit cut nothing');
+  eq(w.quests.get('q_shrine'), 'gathered', 'three loads did not finish the gathering');
+  say('val2', 'ulla.light');
+  eq(w.quests.get('q_shrine'), 'done', 'the fire was not lit');
+  assert(!w.carrying('ore_west'), 'she took the ore and gave it back');
+
+  // The keep: a real door, opened by knowing what is inside it.
+  say('val0', 'brant.keep');
+  assert(!w.doorOpen('keep'), 'the keep stood open before anyone was sent');
+  w.tick(1 / 60);
+  assert(w.doorOpen('keep'), 'the keep would not open for a man who had been sent');
+  eq(w.quests.get('q_keep'), 'opened', 'the log did not notice');
+  standAt('keep');
+  eq(w.quests.get('q_keep'), 'done', 'walking into the keep finished nothing');
+
+  assert(w.character.level >= 3, `the valley paid ${w.character.xp} xp — level ${w.character.level}`);
+  const log = w.questLog();
+  assert(log.length >= 3 && log.every((q) => q.finished), 'the valley left something open');
+});
+
+check('each order sends you somewhere different, and only its own members', () => {
+  // Three guilds, one map, three reasons to walk it. This is the cheapest way
+  // to make one island into three games, and the test that keeps it honest is
+  // that a member of one order cannot be given another's errand.
+  const lines = {
+    watch: 'aldric.order_ask',
+    ember: 'kelm.order_ask',
+    freeblade: 'sarn.order_ask',
+  };
+  const who = { watch: 'npc9', ember: 'npc11', freeblade: 'npc12' };
+
+  for (const [guild, line] of Object.entries(lines)) {
+    for (const sworn of Object.keys(lines)) {
+      const w = createWorld({ seed: 4, beasts: 0, props: 10 });
+      w.character.guild = sworn;
+      w.chapter = 2;
+      const npc = w.people.find((p) => p.id === who[guild]);
+      w.player.pos[0] = npc.pos[0]; w.player.pos[2] = npc.pos[2] - 1.5;
+      w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+      w.player.yaw = 0;
+      const open = w.talk();
+      assert(open, `${who[guild]} would not talk to a ${sworn}`);
+      const ids = open.options.map((o) => o.id);
+      if (guild === sworn) {
+        assert(ids.includes(line), `a sworn ${guild} was given nothing to do — had ${ids.join(', ')}`);
+      } else {
+        assert(!ids.includes(line), `a sworn ${sworn} was given the ${guild}'s errand`);
+      }
+    }
+  }
+});
+
+check('an order errand has a middle, not just an asking and a reward', () => {
+  // Every questline in this game has to be told somewhere, advanced somewhere
+  // else, and closed back where it started. A quest whose middle is missing is
+  // a quest that completes itself, and the flag validator cannot see that.
+  const w = createWorld({ seed: 4, beasts: 0, props: 10 });
+  w.character.guild = 'watch';
+  w.chapter = 2;
+  const say = (whoId, line) => {
+    const npc = w.people.find((p) => p.id === whoId);
+    w.player.pos[0] = npc.pos[0]; w.player.pos[2] = npc.pos[2] - 1.5;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.player.yaw = 0;
+    const open = w.talk();
+    const i = open ? open.options.findIndex((o) => o.id === line) : -1;
+    if (i < 0) return false;
+    w.dialogue.say(i);
+    w.dialogue.close();
+    return true;
+  };
+
+  assert(say('npc9', 'aldric.order_ask'), 'the captain gave no orders');
+  eq(w.quests.get('q_order_watch'), 'told', 'the log did not take it');
+  // The middle is at the harbour, and it cannot be skipped.
+  assert(!say('npc9', 'aldric.order_quay'), 'the captain answered his own question');
+  assert(say('npc6', 'porter.greet'), 'the porter would not talk');
+  w.flags.add('knows:ore_theft');
+  assert(say('npc6', 'porter.ore'), 'the porter had nothing about the ore');
+  assert(w.flags.has('knows:quay_count'), 'the harbour told us nothing');
+  assert(say('npc9', 'aldric.order_quay'), 'the captain would not hear it');
+  eq(w.quests.get('q_order_watch'), 'quay', 'the log did not move');
 });
 
 // --- the wardrobe -------------------------------------------------------------
@@ -1264,11 +1396,21 @@ check('every flag a conversation writes is read by something', () => {
   assert(orphans.length === 0, `flags written and never read: ${orphans.join(', ')}`);
 });
 
-check('every speaker exists in the world and has something to say', () => {
-  const w = createWorld({ seed: 1, beasts: 0, props: 10 });
+check('every speaker exists in some world and has something to say', () => {
+  // Speakers live in one region or the other, so the check is "somebody,
+  // somewhere, is this person" rather than "everybody is on the island".
+  const worlds = Object.keys(REGIONS).map((r) => createWorld({ seed: 1, region: r, beasts: 0, props: 10 }));
   for (const [npcId, conversation] of Object.entries(SPEAKERS)) {
     assert(DIALOGUE[conversation], `${npcId} points at a conversation that does not exist`);
-    assert(w.people.some((p) => p.id === npcId), `${npcId} speaks but is not in the world`);
+    assert(worlds.some((w) => w.people.some((p) => p.id === npcId)),
+      `${npcId} speaks but is in neither world`);
+  }
+  // And nobody is in the world without anything to say, which is the other
+  // half of the same mistake.
+  for (const w of worlds) {
+    for (const p of w.people) {
+      assert(SPEAKERS[p.id], `${p.id} is standing in ${w.region} with no conversation`);
+    }
   }
 });
 

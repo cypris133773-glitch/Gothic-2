@@ -142,6 +142,21 @@ is in the tradition of made the same call at the same place.
 | **The keep** | Whoever is taking the ore is behind that wall. |
 | **The shrine** | Nine standing stones and a cold fire. Somebody still comes here. |
 
+Four people live in it, and there are four for a reason: the valley is meant to
+read as *emptied* rather than populated. Brant runs what is left of a camp that
+held eighty. Hask still cuts a pit nobody pays him for. Ulla keeps a fire that
+has not been lit in a year. One man walks the gap in the palisade. Every one of
+them will tell you where the rest went.
+
+Three things to do there, and each follows the same rule the crates on the farm
+road follow — a place in the world, reached on foot:
+
+- **Where the ore goes.** Told at the camp, counted at a pit, closed at the camp.
+- **The nine stones.** Blackore from all three pits, and the ore is *cut* by
+  standing at each pit rather than bought from anyone.
+- **The keep.** A real door with a real box in it, opened by knowing what is
+  behind it and having been sent.
+
 It looks different because it *is* different: each region carries its own
 ground palette and its own flora, so the valley is bare rock and dead trunks
 where the island is grass and canopies. Everything past the pass also hits
@@ -153,6 +168,22 @@ Crossing carries the man and leaves the world: his purse, his oath, his level,
 what he is carrying, what he knows, what he has been asked to do, the day and
 the hour. Creatures are deliberately not on that list — the valley repopulates,
 and the island you come back to has moved on.
+
+## What each order asks of you
+
+Joining is not the content; being used is. Each order sends you to the same
+three places for different reasons, which is the cheapest way to make one map
+into three games — and the reason picking a guild has to close two doors to
+mean anything.
+
+| Order | What it wants | Where the middle is |
+| --- | --- | --- |
+| **The Watch** | Who moved the ore count off the quay | A porter in the harbour |
+| **The Ember Chapter** | A witness who is not a priest | The shrine, past the pass |
+| **The Freeblades** | Not *who*, but how much, and where it is stacked | A miner counting loads |
+
+A member of one order cannot be given another's errand, and the test suite
+checks all nine combinations rather than the three that were written.
 
 ## Chapters
 

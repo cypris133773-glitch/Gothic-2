@@ -79,6 +79,11 @@ export const ITEMS = {
   // sealed: the design of the errand is that you never learn what it says,
   // which is what makes carrying it an act of trust rather than of curiosity.
   sealed_letter: { kind: KIND.MISC, name: 'Sealed letter', value: 0, quest: true, unsellable: true },
+  // One from each pit. They are separate items rather than three of one so that
+  // the quest is "go to all three places" rather than "stand in one and wait".
+  ore_west: { kind: KIND.MISC, name: 'Blackore from the west drift', value: 0, quest: true, unsellable: true },
+  ore_east: { kind: KIND.MISC, name: 'Blackore from the east drift', value: 0, quest: true, unsellable: true },
+  ore_deep: { kind: KIND.MISC, name: 'Blackore from the deep pit', value: 0, quest: true, unsellable: true },
 };
 
 /** What a creature leaves behind. `needs` entries only drop if you know how. */
@@ -119,6 +124,18 @@ export const TRADERS = {
     gold: 1400,
     stock: [['healing_draught', 8], ['strong_draught', 3]],
     buys: [KIND.POTION, KIND.TROPHY, KIND.MISC],
+  },
+  // Past the pass. Brant is selling what eighty men left behind, so his stock is
+  // good and his purse is empty — which is the valley's economy in two numbers.
+  brant_camp: {
+    gold: 180,
+    stock: [['war_axe', 1], ['militia_sword', 2], ['leather_jerkin', 2], ['strong_draught', 4]],
+    buys: [KIND.WEAPON, KIND.ARMOUR, KIND.TROPHY],
+  },
+  hask_miner: {
+    gold: 90,
+    stock: [['healing_draught', 5], ['lockpick', 4]],
+    buys: [KIND.MISC],
   },
 };
 

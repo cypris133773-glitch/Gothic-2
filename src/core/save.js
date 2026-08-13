@@ -89,6 +89,14 @@ export function snapshot(world) {
       .map((b) => ({
         i: world.beasts.indexOf(b), hp: b.hp, dead: b.state === 7, pos: [...b.pos],
       })),
+    // Men are saved by the same rule and for the same reason: a lighthouse you
+    // cleared has to stay cleared, or the quest that depends on it un-finishes
+    // itself the moment you reload.
+    foes: (world.foes || [])
+      .filter((m) => m.state === 7 || m.hp < m.maxHp)
+      .map((m) => ({
+        i: world.foes.indexOf(m), hp: m.hp, dead: m.state === 7, pos: [...m.pos],
+      })),
   };
 }
 
@@ -154,6 +162,13 @@ export function restore(world, data) {
     beast.hp = b.hp;
     beast.pos.set(b.pos);
     if (b.dead) { beast.state = 7; beast.hp = 0; }
+  }
+  for (const m of d.foes || []) {
+    const foe = world.foes && world.foes[m.i];
+    if (!foe) continue;
+    foe.hp = m.hp;
+    foe.pos.set(m.pos);
+    if (m.dead) { foe.state = 7; foe.hp = 0; foe.counted = true; }
   }
   world.player.xp = c.xp;
   world.player.level = c.level;

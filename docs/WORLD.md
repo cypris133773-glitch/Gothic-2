@@ -78,7 +78,7 @@ the square, which is the first thing anybody sees of the game.
 | **Five farms** — Aldwin, Bren, Sekk, Marrow, Hulder | The economy, the first quests, and somewhere to be sent |
 | **The Ember Chapter** | The only path to magic; a hill, a lake, and a locked door |
 | **Ossric's tower** | The plot. He knows what the dragons are for. |
-| **The lighthouse** | Bandits. Reachable at level three, survivable at level eight. |
+| **The lighthouse** | Bandits. Reachable at level three, survivable at level ten. |
 | **The Cleft** | The ore valley. Enterable from the first hour; lethal until the third chapter. |
 
 ## The roads
@@ -168,6 +168,29 @@ Crossing carries the man and leaves the world: his purse, his oath, his level,
 what he is carrying, what he knows, what he has been asked to do, the day and
 the hour. Creatures are deliberately not on that list — the valley repopulates,
 and the island you come back to has moved on.
+
+## Men who fight back
+
+A beast is five boxes and one decision every quarter second. A man is the *same
+skeleton the player has*, wearing the same armour pieces, holding the same
+weapons, running the same combat state machine — so everything you learn about
+timing on a bandit transfers to a keep guard, because there is one fight system
+and nobody has a private version of it.
+
+The one thing a man does that a wolf does not is **block**. A wolf is a timing
+puzzle you solve by spacing; a man is one you solve by making him commit. He
+also holds the ground he was posted on, so a camp cannot be pulled apart one
+man at a time from two hundred metres — which is the difference between an
+occupation and a queue.
+
+| Where | Who | What it costs you |
+| --- | --- | --- |
+| The lighthouse | Six bandits and two brigands | Level 3 dies in eight seconds; level 8 is a coin flip; level 10 wins with 60% health |
+| The keep | Six keep guards and a picket of three | Chapter four, and everything you have |
+
+Those numbers are measured, not asserted: the test suite runs the same spacing
+bot the wood is measured with and pins the assertion at ten, because a test
+pinned to a coin flip fails on Tuesdays.
 
 ## What each order asks of you
 

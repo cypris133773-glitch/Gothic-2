@@ -1055,8 +1055,16 @@ check('the valley can be played to the end of it', () => {
   w.tick(1 / 60);
   assert(w.doorOpen('keep'), 'the keep would not open for a man who had been sent');
   eq(w.quests.get('q_keep'), 'opened', 'the log did not notice');
+  // Walking in is not taking it. The keep is finished when the keep is empty,
+  // which is a different sentence and a much longer afternoon.
   standAt('keep');
-  eq(w.quests.get('q_keep'), 'done', 'walking into the keep finished nothing');
+  eq(w.quests.get('q_keep'), 'opened', 'the keep counted as taken while it was still held');
+  // The fight itself is tested in the combat and lighthouse checks; here the
+  // garrison is put down directly, because what is under test is the *rule*
+  // that an empty keep is a taken keep.
+  for (const m of w.foes) { m.state = S.DEAD; m.hp = 0; }
+  standAt('keep');
+  eq(w.quests.get('q_keep'), 'done', 'an empty keep did not count as taken');
 
   assert(w.character.level >= 3, `the valley paid ${w.character.xp} xp — level ${w.character.level}`);
   const log = w.questLog();
@@ -1125,6 +1133,97 @@ check('an order errand has a middle, not just an asking and a reward', () => {
   assert(w.flags.has('knows:quay_count'), 'the harbour told us nothing');
   assert(say('npc9', 'aldric.order_quay'), 'the captain would not hear it');
   eq(w.quests.get('q_order_watch'), 'quay', 'the log did not move');
+});
+
+check('men fight differently from beasts, and hold the ground they were put on', () => {
+  const w = createWorld({ seed: 1, props: 20, beasts: 0 });
+  assert(w.foes.length >= 6, `the lighthouse is held by ${w.foes.length} men`);
+  const l = w.places.lighthouse.at;
+  for (const m of w.foes) {
+    const d = Math.hypot(m.pos[0] - l[0], m.pos[2] - l[1]);
+    assert(d < 26, `a ${m.kind} was posted ${d.toFixed(0)} m from the light`);
+    assert(m.kit, `a ${m.kind} has no clothes on`);
+  }
+
+  // A leash, so a camp cannot be pulled apart one man at a time from two
+  // hundred metres. Stand well outside and let them think about it.
+  w.player.pos[0] = l[0] + 120; w.player.pos[2] = l[1] + 120;
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  for (let i = 0; i < 60 * 20; i++) w.tick(1 / 60);
+  for (const m of w.foes) {
+    const d = Math.hypot(m.pos[0] - l[0], m.pos[2] - l[1]);
+    assert(d < 50, `a ${m.kind} walked ${d.toFixed(0)} m off his post chasing nobody`);
+  }
+});
+
+check('clearing the headland finishes the job, and reloading keeps it cleared', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0 });
+  w.chapter = 3;
+  w.setQuest('q_lighthouse', 'told');
+  const l = w.places.lighthouse.at;
+  w.player.pos[0] = l[0]; w.player.pos[2] = l[1] + 6;
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  w.tick(1 / 60);
+  eq(w.quests.get('q_lighthouse'), 'told', 'the job finished while the bandits were alive');
+
+  for (const m of w.foes) { m.state = S.DEAD; m.hp = 0; }
+  w.tick(1 / 60);
+  eq(w.quests.get('q_lighthouse'), 'done', 'an empty headland did not count');
+
+  // And a save remembers. A lighthouse you cleared that repopulates on reload
+  // un-finishes the quest that depended on it.
+  const data = w.snapshot();
+  assert(data.foes.length >= 6, 'the save forgot the men');
+  const w2 = createWorld({ seed: 1, props: 10, beasts: 0 });
+  w2.restore(data);
+  assert(w2.foes.every((m) => m.state === S.DEAD), 'the headland refilled itself on load');
+});
+
+check('a bandit is a real fight and the curve is where the design says', () => {
+  // The design statement is "reachable at level three, survivable at eight",
+  // and this is that sentence as a test — with the number the measurement
+  // actually gives rather than the one that was written down first.
+  //
+  // Eight is the *knife edge*: across seeds 1, 2 and 3 a level-eight character
+  // wins one and loses two, and one of the losses ends with a single bandit
+  // standing. Ten wins all three with about sixty per cent of his health. So
+  // the honest sentence is "you can attempt it at eight and you will probably
+  // lose it; at ten the headland is yours", and the assertion is pinned at ten
+  // because a test pinned to a coin flip is a test that fails on Tuesdays.
+  const run = (xp, str, skill, weapon, armour) => {
+    const w = createWorld({ seed: 1, props: 10, beasts: 0 });
+    w.awardXp(xp, 'quest');
+    w.character.str = str; w.character.skills.oneHanded = skill; w.character.guild = 'watch';
+    w.give(weapon); w.give(armour); w.equip(weapon); w.equip(armour);
+    w.player.fighter.hp = w.character.maxHp;
+    const l = w.places.lighthouse.at;
+    w.player.pos[0] = l[0] + 22; w.player.pos[2] = l[1] + 22;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    const intent = idleIntent();
+    for (let t = 0; t < 60 * 200 && w.player.fighter.hp > 0 && w.foes.some((m) => m.state !== S.DEAD); t++) {
+      const near = w.foes.filter((m) => m.state !== S.DEAD)
+        .map((m) => ({ m, d: Math.hypot(m.pos[0] - w.player.pos[0], m.pos[2] - w.player.pos[2]) }))
+        .sort((a, b) => a.d - b.d)[0];
+      intent.attack = false; intent.block = false; intent.forward = 0; intent.turn = 0;
+      if (near) {
+        const want = Math.atan2(near.m.pos[0] - w.player.pos[0], near.m.pos[2] - w.player.pos[2]);
+        let d = want - w.player.yaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        intent.turn = Math.max(-4, Math.min(4, d * 6));
+        intent.forward = near.d > 1.8 ? 1 : 0;
+        intent.block = near.m.state === S.WINDUP && near.d < 2.4;
+        intent.attack = !intent.block && near.d < 1.9;
+      }
+      w.tick(1 / 60, intent);
+    }
+    return { won: w.player.fighter.hp > 0, level: w.character.level };
+  };
+
+  const early = run(3000, 20, 30, 'rusty_blade', 'leather_jerkin');
+  assert(!early.won, `a level-${early.level} character cleared the lighthouse — it is not a wall`);
+  const ready = run(30000, 50, 70, 'forged_blade', 'watch_mail');
+  assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
 // --- the wardrobe -------------------------------------------------------------

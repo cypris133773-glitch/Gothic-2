@@ -117,6 +117,9 @@ const SCENES = LINEUP
       { name: 'valley', time: 11.0, extra: '&region=cleftvale&start=-4,108&yaw=3.1416' },
       { name: 'camp', time: 9.0, extra: '&region=cleftvale&start=-16,88&yaw=3.1416' },
       { name: 'pit', time: 13.0, extra: '&region=cleftvale&start=-92,36&yaw=3.1416' },
+      // The bandits at the lighthouse: the first framing in the game with men
+      // in it who are not standing about waiting to be spoken to.
+      { name: 'bandits', time: 15.0, extra: '&start=-116,-26&yaw=-1.82' },
     ]
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]

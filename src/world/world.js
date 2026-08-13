@@ -24,6 +24,7 @@ import { idleIntent } from '../core/input.js';
 import { makeRng } from '../core/rng.js';
 import { createFighter, stepFighter, resolveStrike, isStriking, S } from '../game/combat.js';
 import { createBeast, stepBeast, poseBeast, BEASTS } from '../game/beast.js';
+import { createFoe, stepFoe, foeSpoils, FOES } from '../game/foe.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
@@ -512,6 +513,42 @@ export function createWorld(opts = {}) {
   }
   const beastParts = beasts.map(() => []);
 
+  /**
+   * Men, posted where somebody put them.
+   *
+   * Unlike beasts these are placed by hand rather than scattered, because a
+   * camp is a camp: eight bandits round a lighthouse read as an occupation and
+   * eight bandits sprinkled over a headland read as wildlife. They also hold
+   * their ground — see `home` in src/game/foe.js — so a camp cannot be pulled
+   * apart one man at a time from two hundred metres.
+   */
+  const foes = [];
+  if (!opts.lineup && opts.foes !== false) {
+    const frng = makeRng(seed * 2654435761 + 17);
+    const post = (kind, cx, cz, n, spread) => {
+      for (let i = 0; i < n; i++) {
+        const a = (i / n) * Math.PI * 2 + frng.range(-0.3, 0.3);
+        const r = spread * (0.45 + frng() * 0.55);
+        const x = cx + Math.cos(a) * r, z = cz + Math.sin(a) * r;
+        if (terrain.heightAt(x, z) < 0.8) continue;
+        foes.push(createFoe(kind, x, z, terrain, frng));
+      }
+    };
+    if (regionName === DEFAULT_REGION) {
+      // The lighthouse. Chapter three's errand, and the reason the coast road
+      // is worth walking twice.
+      const l = terrain.places.lighthouse.at;
+      post('bandit', l[0], l[1], 6, 15);
+      post('brigand', l[0], l[1], 2, 9);
+    } else {
+      // The keep, and a picket on the road to it.
+      const k = terrain.places.keep.at;
+      post('keeper', k[0], k[1], 6, 17);
+      post('brigand', k[0], k[1] + 34, 3, 9);
+    }
+  }
+  const foeParts = foes.map(() => []);
+
   // The stolen ore, off the farm road past the first bend. It is a thing in the
   // world rather than a dialogue flag: the quest is told in the city and
   // *found* by walking out of the land gate and down the road.
@@ -624,7 +661,7 @@ export function createWorld(opts = {}) {
   };
 
   const world = {
-    seed, terrain, clock, player, camera, props, town, people, beasts, obstacles, ticks: 0,
+    seed, terrain, clock, player, camera, props, town, people, beasts, foes, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
     region: regionName, regionTitle: R.title,
@@ -973,11 +1010,27 @@ export function createWorld(opts = {}) {
         world.setQuest('q_keep', 'opened');
       }
       if (flags.has('pass:keep')) world.openDoor('keep');
+      // The keep is not finished by walking into it. It is finished by there
+      // being nobody left in it, which is a different sentence and a much
+      // longer afternoon.
       if (regionName === 'cleftvale' && quests.get('q_keep') === 'opened') {
         const k = terrain.places.keep.at;
-        if (Math.hypot(player.pos[0] - k[0], player.pos[2] - k[1]) < 12) {
+        const held = foes.some((m) => m.state !== S.DEAD
+          && Math.hypot(m.pos[0] - k[0], m.pos[2] - k[1]) < 40);
+        if (!held && Math.hypot(player.pos[0] - k[0], player.pos[2] - k[1]) < 20) {
           world.setQuest('q_keep', 'done');
           world.awardXp(1500, 'quest');
+        }
+      }
+
+      // The lighthouse, the same way: the headland is quiet when it is quiet.
+      if (regionName === DEFAULT_REGION && quests.get('q_lighthouse') === 'told') {
+        const l = terrain.places.lighthouse.at;
+        const held = foes.some((m) => m.state !== S.DEAD
+          && Math.hypot(m.pos[0] - l[0], m.pos[2] - l[1]) < 40);
+        if (!held) {
+          world.setQuest('q_lighthouse', 'done');
+          world.awardXp(1200, 'quest');
         }
       }
 
@@ -1103,7 +1156,22 @@ export function createWorld(opts = {}) {
         stepBeast(b, player, terrain, dt, rng);
         if (isStriking(b)) resolveStrike(b, f, rng, meleeDamage);
       }
+      for (const m of foes) {
+        stepFoe(m, player, terrain, dt, rng);
+        if (isStriking(m)) resolveStrike(m, f, rng, meleeDamage);
+      }
       if (isStriking(f)) {
+        for (const m of foes) {
+          const hit = resolveStrike(f, m, rng, meleeDamage);
+          if (hit && m.state === S.DEAD && !m.counted) {
+            m.counted = true;
+            const spoils = foeSpoils(m, rng);
+            world.awardXp(spoils.xp, 'quest');
+            character.gold += spoils.gold;
+            for (const id of spoils.items) world.give(id);
+            world.log.push(`${m.def.name} down — ${spoils.gold} coin`);
+          }
+        }
         for (const b of beasts) {
           const hit = resolveStrike(f, b, rng, meleeDamage);
           if (hit && b.state === S.DEAD && !b.counted) {
@@ -1128,6 +1196,7 @@ export function createWorld(opts = {}) {
       const ground = terrain.heightAt(player.pos[0], player.pos[2]);
       if (player.pos[1] < ground) { player.pos[1] = ground; player.onGround = true; }
       for (const b of beasts) b.pos[1] = terrain.heightAt(b.pos[0], b.pos[2]);
+      for (const m of foes) m.pos[1] = terrain.heightAt(m.pos[0], m.pos[2]);
 
       for (const p of people) stepPerson(p, terrain, dt);
       world.checkQuests();
@@ -1217,6 +1286,13 @@ export function createWorld(opts = {}) {
       for (let i = 0; i < people.length; i++) {
         poseHumanoid(peopleParts[i], people[i]);
         for (const part of peopleParts[i]) boxes.push(part);
+      }
+      // Men who fight use the same rig as everybody else, which is the whole
+      // point: a bandit is a person, not a creature that happens to be upright.
+      for (let i = 0; i < foes.length; i++) {
+        if (foes[i].state === S.DEAD) continue;
+        poseHumanoid(foeParts[i], foes[i]);
+        for (const part of foeParts[i]) boxes.push(part);
       }
       return scene;
     },

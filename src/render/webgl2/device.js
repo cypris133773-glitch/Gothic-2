@@ -35,6 +35,7 @@ layout(location = 5) in vec4 iM2;
 layout(location = 6) in vec4 iM3;
 layout(location = 7) in vec4 iTint;   // rgb albedo, a = material index
 layout(location = 9) in float iSway;  // 1 for anything the wind moves
+layout(location = 10) in float iGlow; // 0 for everything lit by the sun
 
 uniform mat4 uProj;
 uniform mat4 uView;
@@ -50,6 +51,7 @@ out vec3 vColor;
 out vec4 vLightPos;
 out float vMat;
 out vec2 vWeights;
+out float vGlow;
 
 void main() {
   vec4 world;
@@ -81,6 +83,7 @@ void main() {
   vWorld = world.xyz;
   vNormal = normal;
   vColor = tint;
+  vGlow = uInstanced == 1 ? iGlow : 0.0;
   vWeights = aWeights;
   vLightPos = uLightVP * world;
   gl_Position = uProj * uView * world;
@@ -100,6 +103,7 @@ in vec3 vColor;
 in vec4 vLightPos;
 in float vMat;
 in vec2 vWeights;
+in float vGlow;
 
 uniform vec3 uSunDir;
 uniform vec3 uSunColor;
@@ -198,6 +202,14 @@ void main() {
   vec3 albedo = vColor * detail;
 
   vec3 lit = albedo * (direct + ambient) + uSunColor * spec + uSkyColor * rim;
+
+  // Emissive. One float per instance, and it is the difference between a bolt
+  // of fire and an orange box: a thing that makes its own light has to stay
+  // bright at midnight, and everything else in this renderer goes dark with the
+  // sun. It does not light what is around it — that would need a light list and
+  // a second pass, and is written down in docs/OPEN-QUESTIONS.md rather than
+  // pretended away.
+  if (vGlow > 0.0) lit = mix(lit, albedo * (7.0 * vGlow), min(1.0, vGlow));
 
   // Exposure, applied before the tonemapper because that is where it belongs.
   // Without it the whole world sat at the top of the ACES curve and the render
@@ -378,6 +390,9 @@ export function createWebGL2Device(canvas, opts = {}) {
       // of the tint, because the tint's alpha already carries the material.
       gl.enableVertexAttribArray(9);
       gl.vertexAttribPointer(9, 1, gl.FLOAT, false, 24 * 4, 20 * 4);
+      gl.enableVertexAttribArray(10);
+      gl.vertexAttribDivisor(10, 1);
+      gl.vertexAttribPointer(10, 1, gl.FLOAT, false, 24 * 4, 21 * 4);
       gl.vertexAttribDivisor(9, 1);
     }
     gl.bindVertexArray(null);
@@ -534,6 +549,7 @@ export function createWebGL2Device(canvas, opts = {}) {
       instanceData[o + 16] = a[0]; instanceData[o + 17] = a[1]; instanceData[o + 18] = a[2];
       instanceData[o + 19] = box.tex || 0;
       instanceData[o + 20] = box.sway || 0;
+      instanceData[o + 21] = box.glow || 0;
       n++;
     }
     gl.bindBuffer(gl.ARRAY_BUFFER, instanceBuf);

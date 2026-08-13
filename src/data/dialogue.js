@@ -584,7 +584,27 @@ export const DIALOGUE = {
       when: (c) => c.has('kelm:offered'),
       text: 'Then let us begin.',
       reply: 'Breathe. Then look at the coal, not the flame.',
-      effects: [{ kind: 'trainer', skill: 'alchemy', free: false }],
+      effects: [{ kind: 'attribute', attr: 'mana', step: 5 }],
+    },
+    {
+      id: 'kelm.first_rune',
+      when: (c) => c.guild === 'ember' && c.has('kelm:offered') && !c.has('kelm:rune'),
+      text: 'Give me something to hold it in.',
+      reply: 'A rune. Lose it and you lose the spell, which is the only lesson '
+        + 'about magic anybody here remembers.',
+      once: true,
+      effects: [
+        { kind: 'give', item: 'rune_fire_bolt' },
+        { kind: 'flag', flag: 'kelm:rune' },
+        { kind: 'xp', amount: 200 },
+      ],
+    },
+    {
+      id: 'kelm.trade',
+      when: (c) => c.guild === 'ember' && c.has('kelm:rune'),
+      text: 'What else does the Chapter keep?',
+      reply: 'Runes, and nothing you would want. Do not ask the price of the last one.',
+      effects: [{ kind: 'trade', trader: 'kelm_chapter' }],
     },
     {
       id: 'kelm.ossric',

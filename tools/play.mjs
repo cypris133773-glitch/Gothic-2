@@ -301,6 +301,37 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- magic, through real key events -------------------------------------
+    // Give the man a rune and the mana to hold it, then throw it with R. The
+    // grant is a world call because there is no shop in this test; everything
+    // after it is keys.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      w.character.mana = 40; w.reloadout(); w.give('rune_fire_bolt');
+    })()`);
+    await page.keyDown('KeyK'); await page.keyUp('KeyK');
+    await sleep(150);
+    const runes = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('K opens the runes', runes.book === 'runes', `tab ${runes.book}`);
+    ok('and the rune is in it', runes.spells.includes('fire_bolt'), runes.spells.join(', ') || 'none');
+    ok('with a full pool', runes.mana === runes.manaMax && runes.manaMax === 40,
+      `${runes.mana}/${runes.manaMax}`);
+
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(120);
+    await page.keyDown('KeyR'); await page.keyUp('KeyR');
+    await sleep(120);
+    const casting = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('R starts a cast', casting.casting === 'fire_bolt', String(casting.casting));
+    ok('and the mana went at the start of it', casting.mana === 32, `${casting.mana}`);
+
+    // Wind-up plus recovery is 52 ticks — about 0.9 s — and the first version
+    // of this check looked after 0.4 and reported a stuck cast.
+    await sleep(1100);
+    const flown = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('and the cast finishes on its own', !flown.casting, String(flown.casting));
+    ok('no error from casting', !(await page.evaluate('window.GRIMWARD.error || null')));
+
     // --- crossing the pass, with the one loading screen in the game ---------
     const onIsland = await page.evaluate('window.GRIMWARD.probeState()');
     ok('the game starts on the island', onIsland.region === 'verath', onIsland.regionTitle);

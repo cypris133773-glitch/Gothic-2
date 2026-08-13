@@ -192,6 +192,44 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## Magic
+
+The Chapter's path, and it is built on the same three rules as everything else.
+
+**A rune is an item.** You do not *know* fire bolt; you carry the rune for it,
+it takes a slot in the pack, it can be sold, and losing it loses the spell.
+That is what makes the Chapter feel like equipment rather than like a menu that
+filled itself in.
+
+**Mana is a wall, not a modifier.** Under a rune's mana requirement you cannot
+cast it at all — not "you cast it weaker" — exactly as a sword's strength
+requirement works (P3). The pool and the requirement are deliberately different
+numbers: a novice with just enough mana to hold a rune can cast it about twice
+before he is empty, and closing that gap is the whole of what raising mana buys.
+
+**A bolt is a thing in the world.** It leaves the hand at the end of the
+wind-up, takes time to arrive, can miss because the wolf moved, and can hit
+something that walked into it. A spell that resolves instantly on a target is a
+dice roll with a particle effect on it.
+
+A cast is a commitment on the same footing as a swing: the mana goes at the
+start, being hit ends the cast, and the mana does not come back. That is the
+only thing that makes being interrupted matter, and it is why a caster learns
+to stand behind something.
+
+| Rune | Needs | Costs | What it does |
+| --- | --- | --- | --- |
+| Fire bolt | 10 mana | 8 | 46, ignoring armour |
+| Closed wound | 15 | 20 | Heals 70, on yourself |
+| Ice lance | 25 | 16 | 78, faster and thinner |
+| Firestorm | 45 | 34 | 120, and it does not stop at the first thing |
+
+Bolts are the one thing in the renderer that makes its own light — one float
+per instance — because otherwise a fire bolt at dusk is a brown box travelling
+at twenty-six metres a second. It does not light what is around it; that needs
+a light list and a second pass, and is written down in `OPEN-QUESTIONS.md`
+rather than pretended away.
+
 ## What each order asks of you
 
 Joining is not the content; being used is. Each order sends you to the same

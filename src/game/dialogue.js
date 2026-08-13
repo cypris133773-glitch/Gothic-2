@@ -94,6 +94,11 @@ export function applyEffect(world, effect, npc) {
     case 'xp':
       world.awardXp(effect.amount, 'quest');
       break;
+    case 'attribute':
+      // The *offer* of an attribute lesson, on the same footing as a skill
+      // one — buying is still the separate, explicit act in world.train().
+      world.openTrainer = { npc: npc && npc.id, ...effect };
+      break;
     case 'trainer':
       // The offer, not the training. Buying is a separate, explicit act — see
       // world.train(), which is the only path that can raise a number.
@@ -123,4 +128,4 @@ export function applyEffect(world, effect, npc) {
 }
 
 /** Every effect kind the engine knows. The validator asserts data uses only these. */
-export const EFFECT_KINDS = ['flag', 'unflag', 'gold', 'xp', 'trainer', 'trade', 'give', 'take', 'quest', 'guild', 'hostile'];
+export const EFFECT_KINDS = ['flag', 'unflag', 'gold', 'xp', 'trainer', 'attribute', 'trade', 'give', 'take', 'quest', 'guild', 'hostile'];

@@ -120,6 +120,12 @@ const SCENES = LINEUP
       // The bandits at the lighthouse: the first framing in the game with men
       // in it who are not standing about waiting to be spoken to.
       { name: 'bandits', time: 15.0, extra: '&start=-116,-26&yaw=-1.82' },
+      // A bolt in flight. `cast` fires one on the probe's third frame, which is
+      // the only way to photograph something that lives for a second and a half.
+      // Dusk, because a thing that makes its own light has to be photographed
+      // where the sun is not doing the work. `probe` runs the extra frames the
+      // bolt needs to leave the caster's hand.
+      { name: 'magic', time: 18.2, probe: 34, extra: '&start=-118,-28&yaw=-1.82&cast=fire_bolt' },
     ]
   : opt('time')
   ? [{ name: 'custom', time: Number(opt('time')) }]
@@ -163,7 +169,7 @@ async function run() {
       process.stdout.write(`  ${scene.name} …\r`);
       // tier=medium on purpose: the gate photographs what a normal machine
       // sees, not what this GPU-less container would default itself to.
-      const url = `http://127.0.0.1:${port}/?probe=1&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium${LINEUP ? `&lineup=${scene.kits || ''}` : ''}${scene.extra || ''}`;
+      const url = `http://127.0.0.1:${port}/?probe=${scene.probe || 1}&seed=${SEED}&time=${scene.time}&renderScale=0.6&tier=medium${LINEUP ? `&lineup=${scene.kits || ''}` : ''}${scene.extra || ''}`;
       await page.send('Page.navigate', { url });
       const probe = await page.waitFor('window.GRIMWARD && window.GRIMWARD.probe',
         { timeout: 60000, what: `${scene.name} to render` });

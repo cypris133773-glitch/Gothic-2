@@ -14,6 +14,7 @@ import { STATE_NAME } from './game/combat.js';
 import { createStorage } from './core/save.js';
 import { SKILLS, xpToNext, lpForAttribute } from './game/character.js';
 import { CHAPTERS } from './game/chapters.js';
+import { SPELLS } from './game/magic.js';
 import { ITEMS } from './data/items.js';
 
 const TICK_MS = 1000 / 60;          // the simulation is 60 Hz, always
@@ -163,6 +164,10 @@ async function boot() {
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
       book: tab,
+      mana: world.caster.mana, manaMax: world.caster.max,
+      casting: world.caster.casting, bolts: world.bolts.length,
+      spells: world.spells().map((sp) => `${sp.id}${sp.ok ? '' : '!'}`),
+      selectedSpell,
       doors: { upper: world.doorOpen('upper') },
       beasts: world.beasts.map((b) => ({ kind: b.kind, hp: b.hp, state: b.state,
         dist: +Math.hypot(b.pos[0] - world.player.pos[0], b.pos[2] - world.player.pos[2]).toFixed(2) })),
@@ -243,6 +248,7 @@ async function boot() {
   const hintEl = document.getElementById('book-hint');
   const tabsEl = document.getElementById('book-tabs');
   let tab = null;                     // null = closed
+  let selectedSpell = null;           // which rune R throws
 
   const el = (tag, cls, text) => {
     const n = document.createElement(tag);
@@ -342,6 +348,34 @@ async function boot() {
     bodyEl.replaceChildren(...out);
   }
 
+  function renderRunes() {
+    const list = world.spells();
+    actions = [];
+    const out = [];
+    if (!list.length) {
+      out.push(el('p', 'empty', 'You are carrying no runes. The Chapter sells them, and only to its own.'));
+    } else {
+      out.push(el('h3', null, 'Runes  —  press the number to make it the one R throws'));
+      const ul = el('ul');
+      for (const [i, sp] of list.entries()) {
+        if (!selectedSpell) selectedSpell = sp.id;
+        const note = sp.ok ? `${sp.cost} mana` : sp.why;
+        const cls = sp.id === selectedSpell ? 'on' : (sp.ok ? '' : 'off');
+        ul.append(row(i + 1, `${sp.name}${sp.id === selectedSpell ? '  ◄' : ''}`, note, cls));
+        actions.push({ do: () => { selectedSpell = sp.id; return { ok: true }; } });
+      }
+      out.push(ul);
+    }
+    const dl = el('dl');
+    dl.append(el('dt', null, 'Mana'), el('dd', null,
+      `${Math.floor(world.caster.mana)} / ${world.caster.max}`));
+    dl.append(el('dt', null, 'Casting'), el('dd', null,
+      world.caster.casting ? SPELLS[world.caster.casting].short : '—'));
+    out.push(el('h3', null, 'The pool'), dl);
+    hintEl.textContent = '1–9 choose · R throws it · C/I/J/K switch · Esc closes';
+    bodyEl.replaceChildren(...out);
+  }
+
   function renderLog() {
     const rows = world.questLog();
     actions = [];
@@ -375,7 +409,7 @@ async function boot() {
     for (const b of tabsEl.querySelectorAll('button')) {
       b.setAttribute('aria-selected', String(b.dataset.tab === tab));
     }
-    ({ sheet: renderSheet, pack: renderPack, log: renderLog })[tab]();
+    ({ sheet: renderSheet, pack: renderPack, log: renderLog, runes: renderRunes })[tab]();
   }
   const openBook = (which) => { tab = tab === which ? null : which; renderBook(); };
   api.book = { open: openBook, get tab() { return tab; }, render: renderBook };
@@ -390,6 +424,7 @@ async function boot() {
       if (e.code === 'KeyC') { openBook('sheet'); return; }
       if (e.code === 'KeyI') { openBook('pack'); return; }
       if (e.code === 'KeyJ') { openBook('log'); return; }
+      if (e.code === 'KeyK') { openBook('runes'); return; }
       const n = Number(e.key);
       if (n >= 1 && n <= 9 && actions[n - 1]) {
         const r = actions[n - 1].do();
@@ -410,9 +445,20 @@ async function boot() {
     // if there is nobody there, which is the correct amount of feedback for a
     // key pressed at an empty street.
     if (e.code === 'KeyE') { if (world.talk()) renderTalk(); }
+    // R casts whatever rune is selected. Selection lives on the spell tab, so
+    // the key is a trigger and never a menu: a fight is not the place to pick.
+    if (e.code === 'KeyR') {
+      const list = world.spells();
+      const pick = list.find((sp) => sp.id === selectedSpell) || list[0];
+      if (!pick) { log('you are carrying no runes'); return; }
+      const r = world.cast(pick.id);
+      if (!r.ok) log(r.why);
+      return;
+    }
     if (e.code === 'KeyC') { openBook('sheet'); return; }
     if (e.code === 'KeyI') { openBook('pack'); return; }
     if (e.code === 'KeyJ') { openBook('log'); return; }
+    if (e.code === 'KeyK') { openBook('runes'); return; }
     if (e.code === 'F5') { e.preventDefault(); save('manual'); }
     if (e.code === 'F9') { e.preventDefault(); load('manual'); }
   });
@@ -468,6 +514,15 @@ async function boot() {
   if (params.has('probe')) {
     const scale = renderScale || 0.5;
     device.resize(Math.round(innerWidth * scale), Math.round(innerHeight * scale));
+    // `?cast=` throws a rune on the way through, which is the only way to
+    // photograph something that lives for a second and a half. It grants the
+    // rune and the mana too — a framing is a framing, not a playthrough.
+    if (params.has('cast')) {
+      world.character.mana = 60;
+      world.reloadout();
+      world.give(`rune_${params.get('cast')}`);
+      world.cast(params.get('cast'));
+    }
     for (let i = 0; i < PROBE_FRAME; i++) {
       world.tick(TICK_MS / 1000, idleIntent());
       if (lineupCam) frameLineup();
@@ -541,6 +596,9 @@ async function boot() {
         fight: `${STATE_NAME[pl.fighter.state]}${pl.fighter.t ? ` ${pl.fighter.t}` : ''}`
           + `  hp ${pl.fighter.hp}/${pl.fighter.maxHp}  combo ${pl.fighter.combo}`,
         hunt: `${world.beasts.filter((b) => b.state !== 7).length} alive  xp ${pl.xp}  level ${pl.level}`,
+        mana: `${Math.floor(world.caster.mana)}/${world.caster.max} mana`
+          + `${world.caster.casting ? `  casting ${SPELLS[world.caster.casting].short}` : ''}`
+          + `${world.bolts.length ? `  ${world.bolts.length} in flight` : ''}`,
         sheet: `${world.character.gold} gold  ${world.character.lp} LP  1H ${world.character.skills.oneHanded}%`
           + `${world.character.guild ? `  ${world.character.guild}` : ''}`,
         near: world.dialogue.isOpen ? 'talking' : (world.speaker() ? 'E to talk' : ''),

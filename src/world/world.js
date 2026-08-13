@@ -25,6 +25,10 @@ import { makeRng } from '../core/rng.js';
 import { createFighter, stepFighter, resolveStrike, isStriking, S } from '../game/combat.js';
 import { createBeast, stepBeast, poseBeast, BEASTS } from '../game/beast.js';
 import { createFoe, stepFoe, foeSpoils, FOES } from '../game/foe.js';
+import {
+  SPELLS, RUNE_SPELL, createCaster, syncCaster, canCast, beginCast, stepCaster,
+  breakCast, createBolt, stepBolt, poseBolt,
+} from '../game/magic.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
@@ -458,6 +462,13 @@ export function createWorld(opts = {}) {
 
   applyLoadout(inventory, character, player.fighter);
 
+  // The caster sits beside the fighter rather than inside it, because a sword
+  // has no mana and a rune has no reach. Both belong to the same man; neither
+  // belongs to the other.
+  const caster = createCaster(character);
+  // Bolts in flight, and the boxes that draw them.
+  const bolts = [];
+
   // Props reach as far as the furthest landmark now: the island is 340 m across
   // the built area, not the 110 m ring the first town sat in.
   const bound = terrain.size * 0.38;
@@ -548,6 +559,7 @@ export function createWorld(opts = {}) {
     }
   }
   const foeParts = foes.map(() => []);
+  const boltParts = [];
 
   // The stolen ore, off the farm road past the first bend. It is a thing in the
   // world rather than a dialogue flag: the quest is told in the city and
@@ -664,6 +676,7 @@ export function createWorld(opts = {}) {
     seed, terrain, clock, player, camera, props, town, people, beasts, foes, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
+    caster, bolts,
     region: regionName, regionTitle: R.title,
     // Set when the player is standing in an exit and may use it. The world
     // cannot replace itself, so travelling is the caller's job: main.js reads
@@ -823,6 +836,35 @@ export function createWorld(opts = {}) {
       return world;
     },
 
+    // --- magic ------------------------------------------------------------------
+
+    /** Which spells this character could cast if he wanted to, right now. */
+    spells() {
+      return Object.entries(RUNE_SPELL)
+        .filter(([rune]) => has(inventory, rune))
+        .map(([rune, id]) => {
+          const check = canCast(id, character, caster, (r) => has(inventory, r));
+          return {
+            id, rune, name: SPELLS[id].short, cost: SPELLS[id].cost,
+            needs: SPELLS[id].mana, ok: check.ok, why: check.why || null,
+          };
+        });
+    },
+
+    /**
+     * Begin a cast. Refuses with a reason rather than a boolean, because "you
+     * have no rune", "your mana is too low to hold it" and "your pool is empty"
+     * are three different problems with three different answers.
+     */
+    cast(spellId) {
+      const check = canCast(spellId, character, caster, (r) => has(inventory, r));
+      if (!check.ok) { world.log.push(check.why); return check; }
+      // A swing and a cast are the same commitment, so they cannot overlap.
+      if (isStriking(player.fighter)) return { ok: false, why: 'both hands are busy' };
+      beginCast(spellId, caster);
+      return { ok: true, spell: spellId };
+    },
+
     /** Take a door out of the world. Idempotent; the geometry only goes once. */
     openDoor(name) {
       const d = doors.find((x) => x.name === name);
@@ -913,6 +955,7 @@ export function createWorld(opts = {}) {
      */
     reloadout() {
       applyLoadout(inventory, character, player.fighter);
+      syncCaster(caster, character);
       player.kit = kitForArmour(inventory.armour);
       return player.kit;
     },
@@ -1079,6 +1122,10 @@ export function createWorld(opts = {}) {
     train(step) {
       const offer = world.openTrainer;
       if (!offer) return { ok: false, why: 'nobody is teaching' };
+      // An attribute lesson and a skill lesson are the same act from the
+      // player's side — stand in front of the man and press T — so they arrive
+      // at the same door and part here rather than in the key handler.
+      if (offer.attr) return world.raise(offer.attr, step ?? offer.step ?? 1);
       const skill = offer.skill;
       const amount = step ?? offer.step ?? 1;
       const current = character.skills[skill] ?? 0;
@@ -1102,6 +1149,7 @@ export function createWorld(opts = {}) {
       if (r.ok) {
         world.log.push(`${attr} is now ${r.value} (${r.cost} LP)`);
         if (attr === 'str') player.fighter.str = character.str;
+        if (attr === 'mana') syncCaster(caster, character);
       }
       return r;
     },
@@ -1158,7 +1206,62 @@ export function createWorld(opts = {}) {
       }
       for (const m of foes) {
         stepFoe(m, player, terrain, dt, rng);
-        if (isStriking(m)) resolveStrike(m, f, rng, meleeDamage);
+        if (isStriking(m)) {
+          const landed = resolveStrike(m, f, rng, meleeDamage);
+          // Being hit ends a cast and keeps the mana. That is the only thing
+          // that makes being interrupted matter, and it is why a mage learns to
+          // cast from behind something.
+          if (landed) breakCast(caster);
+        }
+      }
+
+      // --- magic ---------------------------------------------------------------
+      const released = stepCaster(caster, dt);
+      if (released) {
+        const spell = SPELLS[released];
+        if (spell.self) {
+          const before = f.hp;
+          f.hp = Math.min(character.maxHp, f.hp + spell.heals);
+          world.log.push(`healed ${f.hp - before}`);
+        } else {
+          // Out of the hand, at chest height, along the way he is looking.
+          bolts.push(createBolt(released, [
+            player.pos[0] + Math.sin(player.yaw) * 0.6,
+            player.pos[1] + 1.25,
+            player.pos[2] + Math.cos(player.yaw) * 0.6,
+          ], player.yaw, player.pitch * 0.6));
+        }
+      }
+      for (let i = bolts.length - 1; i >= 0; i--) {
+        const bolt = bolts[i];
+        const struck = stepBolt(bolt, [...beasts, ...foes], terrain, dt);
+        for (const target of struck) {
+          const spell = SPELLS[bolt.spell];
+          // Magic ignores armour and cannot be parried. That is what a rune is
+          // *for*, and it is why the mana wall has to be a real one.
+          target.hp -= spell.damage;
+          if (target.hp <= 0 && target.state !== S.DEAD) {
+            target.hp = 0;
+            target.state = S.DEAD;
+            if (!target.counted) {
+              target.counted = true;
+              if (target.foe) {
+                const spoils = foeSpoils(target, rng);
+                world.awardXp(spoils.xp, 'quest');
+                character.gold += spoils.gold;
+                for (const id of spoils.items) world.give(id);
+              } else {
+                world.awardXp(target.def.xp, 'quest');
+                for (const drop of DROPS[target.kind] || []) {
+                  const def = ITEMS[drop.item];
+                  if (def.needs && !flags.has(`skill:${def.needs}`)) continue;
+                  if (rng() < drop.chance) world.give(drop.item);
+                }
+              }
+            }
+          }
+        }
+        if (bolt.life <= 0) bolts.splice(i, 1);
       }
       if (isStriking(f)) {
         for (const m of foes) {
@@ -1293,6 +1396,10 @@ export function createWorld(opts = {}) {
         if (foes[i].state === S.DEAD) continue;
         poseHumanoid(foeParts[i], foes[i]);
         for (const part of foeParts[i]) boxes.push(part);
+      }
+      for (let i = 0; i < bolts.length; i++) {
+        if (!boltParts[i]) boltParts[i] = {};
+        boxes.push(poseBolt(boltParts[i], bolts[i]));
       }
       return scene;
     },

@@ -8,7 +8,7 @@
 // So every weapon's `str` is a wall, the walls are spaced deliberately, and the
 // gap between them is what a trainer sells you.
 
-export const KIND = { WEAPON: 'weapon', ARMOUR: 'armour', POTION: 'potion', TROPHY: 'trophy', MISC: 'misc' };
+export const KIND = { WEAPON: 'weapon', ARMOUR: 'armour', POTION: 'potion', TROPHY: 'trophy', RUNE: 'rune', MISC: 'misc' };
 
 export const ITEMS = {
   // --- weapons ---------------------------------------------------------------
@@ -71,6 +71,30 @@ export const ITEMS = {
   boar_hide: { kind: KIND.TROPHY, name: 'Boar hide', value: 40, from: 'boar', needs: 'skinning' },
   boar_tusk: { kind: KIND.TROPHY, name: 'Boar tusk', value: 18, from: 'boar' },
 
+  // --- runes -------------------------------------------------------------------
+  // A rune is an item, not a thing you know. It takes a slot, it can be sold,
+  // and losing it loses the spell — which is what makes the Chapter's path feel
+  // like equipment rather than a menu that filled itself in. `mana` is a wall
+  // in exactly the way `str` is on a sword (P3).
+  rune_fire_bolt: {
+    kind: KIND.RUNE, name: 'Rune of the fire bolt', spell: 'fire_bolt',
+    mana: 10, value: 320,
+    note: 'The first rune, and the first reason mana is worth learning points.',
+  },
+  rune_heal: {
+    kind: KIND.RUNE, name: 'Rune of the closed wound', spell: 'heal_wound',
+    mana: 15, value: 480,
+  },
+  rune_ice_lance: {
+    kind: KIND.RUNE, name: 'Rune of the ice lance', spell: 'ice_lance',
+    mana: 25, value: 900,
+  },
+  rune_fire_storm: {
+    kind: KIND.RUNE, name: 'Rune of the firestorm', spell: 'fire_storm',
+    mana: 45, value: 2200, guild: 'ember',
+    note: 'Chapter runes are guild gear: you cannot buy your way into the order.',
+  },
+
   // --- misc ------------------------------------------------------------------
   lockpick: { kind: KIND.MISC, name: 'Lockpick', value: 12 },
   ore_crate: { kind: KIND.MISC, name: 'Crate of blackore', value: 0, quest: true, unsellable: true },
@@ -122,8 +146,14 @@ export const TRADERS = {
   },
   vessa_alchemist: {
     gold: 1400,
-    stock: [['healing_draught', 8], ['strong_draught', 3]],
-    buys: [KIND.POTION, KIND.TROPHY, KIND.MISC],
+    stock: [['healing_draught', 8], ['strong_draught', 3], ['rune_fire_bolt', 1]],
+    buys: [KIND.POTION, KIND.TROPHY, KIND.MISC, KIND.RUNE],
+  },
+  // The Chapter sells runes and nothing else, and only to its own.
+  kelm_chapter: {
+    gold: 2600,
+    stock: [['rune_fire_bolt', 2], ['rune_heal', 2], ['rune_ice_lance', 1], ['rune_fire_storm', 1]],
+    buys: [KIND.RUNE, KIND.POTION],
   },
   // Past the pass. Brant is selling what eighty men left behind, so his stock is
   // good and his purse is empty — which is the valley's economy in two numbers.

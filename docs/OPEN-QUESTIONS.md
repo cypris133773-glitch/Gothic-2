@@ -42,3 +42,16 @@ says what is unknown, what it blocks, and when it has to be answered.
 - **Where the difficulty option applies.** The brief says enemy damage only,
   never placement. Worth re-testing at M10 whether a ±25% band is enough for the
   people who bounce off the first wolf pack.
+
+
+## Emissive things do not light their surroundings
+
+A bolt in flight is drawn with an emissive term — one float per instance, mixed
+in after the lighting — so it stays bright at midnight. It does **not** cast
+light on the ground, the caster or anything it passes.
+
+Doing that properly needs a list of point lights uploaded per frame and either
+a second pass or a forward-plus tile assignment, which is a real piece of
+renderer work rather than a tweak. Until it exists, a fire bolt at night is a
+bright object in a dark wood rather than a moving lamp, and that is a thing to
+know rather than a thing to be surprised by.

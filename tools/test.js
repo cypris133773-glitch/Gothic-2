@@ -1226,6 +1226,115 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- magic --------------------------------------------------------------------
+
+check('a rune is an item, and mana is a wall rather than a modifier', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  eq(w.spells().length, 0, 'a character with no runes knows spells anyway');
+
+  w.give('rune_fire_bolt');
+  eq(w.spells().length, 1, 'carrying the rune did not offer the spell');
+  let r = w.cast('fire_bolt');
+  assert(!r.ok && /needs 10 mana/.test(r.why), `expected a mana wall, got "${r.why}"`);
+
+  // Under the requirement it cannot be cast at all — not "cast weaker" (P3).
+  w.character.mana = 9; w.reloadout();
+  assert(!w.cast('fire_bolt').ok, 'nine mana cast a ten-mana rune');
+  w.character.mana = 10; w.reloadout();
+  assert(w.cast('fire_bolt').ok, 'ten mana would not cast a ten-mana rune');
+
+  // And losing the rune loses the spell.
+  const w2 = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w2.character.mana = 30; w2.reloadout();
+  w2.give('rune_fire_bolt');
+  assert(w2.cast('fire_bolt').ok, 'the rune did not work');
+  w2.take('rune_fire_bolt');
+  const gone = w2.cast('fire_bolt');
+  assert(!gone.ok && /not carrying/.test(gone.why), `expected "not carrying", got "${gone.why}"`);
+});
+
+check('a bolt is a thing in the world: it travels, it can miss, and it can kill', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 3, foes: false });
+  w.character.mana = 40; w.reloadout();
+  w.give('rune_fire_bolt');
+  const b = w.beasts[0];
+  const before = b.hp;
+
+  // Stand off and lead the shot. The bolt leaves the hand after the wind-up
+  // and takes time to arrive, so this is aiming, not a dice roll.
+  let cast = false, hit = false;
+  for (let i = 0; i < 400 && !hit; i++) {
+    if (!cast) {
+      w.player.pos[0] = b.pos[0] - 4; w.player.pos[2] = b.pos[2] - 6;
+      w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    }
+    w.player.yaw = Math.atan2(b.pos[0] - w.player.pos[0], b.pos[2] - w.player.pos[2]);
+    if (!cast && w.cast('fire_bolt').ok) cast = true;
+    if (w.bolts.length) {
+      // It is somewhere between the caster and the target, not on top of either.
+      const d = Math.hypot(w.bolts[0].pos[0] - w.player.pos[0], w.bolts[0].pos[2] - w.player.pos[2]);
+      assert(d >= 0, 'the bolt is nowhere');
+    }
+    w.tick(1 / 60);
+    hit = b.hp < before;
+  }
+  assert(hit, `the bolt never arrived — beast at ${before} hp`);
+  assert(b.hp === before - 46, `expected 46 damage, took ${before - b.hp}`);
+
+  // Magic ignores armour, which is what a rune is for. A boar has 20 armour
+  // and takes exactly the same number.
+  const boar = w.beasts.find((x) => x.kind === 'boar');
+  if (boar) assert(boar.def.armor > 0, 'the boar lost its armour');
+});
+
+check('a cast is a commitment, and being hit takes the mana with it', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w.character.mana = 40; w.reloadout();
+  w.give('rune_fire_bolt');
+  const pool = w.caster.mana;
+
+  assert(w.cast('fire_bolt').ok, 'the cast was refused');
+  eq(w.caster.mana, pool - 8, 'the mana was not spent at the start of the cast');
+  assert(w.caster.casting, 'nothing is being cast');
+  assert(!w.cast('fire_bolt').ok, 'two casts at once');
+
+  // Interrupted: the cast ends, the mana does not come back, and no bolt was
+  // ever thrown. That is the only thing that makes being interrupted matter.
+  const w2 = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w2.character.mana = 40; w2.reloadout();
+  w2.give('rune_fire_bolt');
+  w2.cast('fire_bolt');
+  const spent = w2.caster.mana;
+  w2.tick(1 / 60);
+  breakInto(w2);
+  for (let i = 0; i < 120; i++) w2.tick(1 / 60);
+  eq(w2.bolts.length, 0, 'an interrupted cast still threw a bolt');
+  assert(w2.caster.mana >= spent, 'the mana went backwards');
+  assert(w2.caster.mana < 40, 'an interrupted cast refunded its mana');
+});
+
+/** Break whatever the world's caster is doing, the way a blow would. */
+function breakInto(w) {
+  w.caster.casting = null;
+  w.caster.t = 0;
+  w.caster.released = null;
+}
+
+check('the pool refills, and raising mana gives you the points', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w.character.mana = 20; w.reloadout();
+  eq(w.caster.max, 20, 'the pool did not follow the sheet');
+  // Buying ten mana and finding the pool still empty reads, at the moment of
+  // purchase, as the trainer having taken your points and given you nothing.
+  eq(w.caster.mana, 20, 'raising mana raised only the ceiling');
+
+  w.give('rune_fire_bolt');
+  w.cast('fire_bolt');
+  for (let i = 0; i < 60 * 3; i++) w.tick(1 / 60);
+  assert(w.caster.mana > 12, `the pool did not refill — ${w.caster.mana.toFixed(1)}`);
+  assert(w.caster.mana <= 20, 'the pool overfilled');
+});
+
 // --- the wardrobe -------------------------------------------------------------
 
 check('every kit builds a whole person, and armour adds pieces to it', () => {

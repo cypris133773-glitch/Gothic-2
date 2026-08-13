@@ -160,6 +160,53 @@ export function breakCast(caster) {
 // --- things that travel -------------------------------------------------------
 
 /**
+ * How big a target is, as a cylinder: half-width, and how high its middle is.
+ *
+ * Shared by bolts and arrows so the two can never disagree about the size of a
+ * wolf. A creature declares its body; anything else is a man.
+ */
+export function hitVolume(t) {
+  const body = t.def && t.def.body ? Math.max(t.def.body[0], t.def.body[2]) * 0.5 : 0.42;
+  const chest = t.def && t.def.body ? t.def.body[1] * 0.5 + (t.def.legs || 0) : 1.0;
+  return { r: body, chest };
+}
+
+/**
+ * Did a projectile pass through this target *between* two ticks?
+ *
+ * This is the difference between a bow that works and a bow that does not. An
+ * arrow travels 1.03 m per tick; a wolf is about 1.2 m across. A test that asks
+ * "is the arrow inside the wolf right now" therefore misses more often than it
+ * hits — the arrow is 1.17 m in front on one tick and 0.14 m behind on the
+ * next, and was never inside on either. The measured hit rate for a master
+ * archer at twelve metres was sixty-eight per cent, which reads as a broken
+ * weapon and was a broken test.
+ *
+ * So: closest approach of the segment `from → to` to the target's centre,
+ * clamped to the segment. Cheap, exact enough, and it makes the arrow's speed
+ * a property of the arrow rather than of the tick rate.
+ */
+export function sweepHits(from, to, target, radius) {
+  const { r, chest } = hitVolume(target);
+  const cx = target.pos[0], cy = target.pos[1] + chest, cz = target.pos[2];
+  const dx = to[0] - from[0], dy = to[1] - from[1], dz = to[2] - from[2];
+  const len2 = dx * dx + dy * dy + dz * dz;
+  let t = len2 > 1e-9
+    ? ((cx - from[0]) * dx + (cy - from[1]) * dy + (cz - from[2]) * dz) / len2
+    : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const px = from[0] + dx * t, py = from[1] + dy * t, pz = from[2] + dz * t;
+  // A body is taller than it is wide, so the vertical miss is measured against
+  // the half-height and the horizontal against the half-width.
+  const flat = Math.hypot(px - cx, pz - cz);
+  const rise = Math.abs(py - cy);
+  // A graze counts. Twenty centimetres of slack on the flank, because the
+  // bodies here are boxes standing in for animals and the last thing a player
+  // should be doing is arguing with a hitbox corner.
+  return flat <= r + radius + 0.2 && rise <= chest + radius + 0.2;
+}
+
+/**
  * A bolt.
  *
  * It is a position, a velocity and a countdown, and it is stepped by the world
@@ -192,6 +239,7 @@ export function createBolt(spellId, pos, yaw, pitch = 0) {
  */
 export function stepBolt(bolt, targets, terrain, dt) {
   const spell = SPELLS[bolt.spell];
+  const was = [bolt.pos[0], bolt.pos[1], bolt.pos[2]];
   bolt.pos[0] += bolt.vel[0] * dt;
   bolt.pos[1] += bolt.vel[1] * dt;
   bolt.pos[2] += bolt.vel[2] * dt;
@@ -208,20 +256,10 @@ export function stepBolt(bolt, targets, terrain, dt) {
   const struck = [];
   for (const t of targets) {
     if (t.state === 7 || bolt.hit.has(t)) continue;
-    // How big the thing actually is, rather than a constant. A boar is nearly a
-    // metre across and a bolt was passing eight inches from its flank and
-    // reporting a miss, which reads as the spell being broken rather than as
-    // the shot being bad.
-    const body = t.def && t.def.body
-      ? Math.max(t.def.body[0], t.def.body[2]) * 0.5
-      : 0.42;                                   // a man, at the shoulder
-    const chest = t.def && t.def.body ? t.def.body[1] * 0.5 + (t.def.legs || 0) : 1.0;
-    const reach = spell.radius + body + 0.2;
-    const dx = t.pos[0] - bolt.pos[0], dy = (t.pos[1] + chest) - bolt.pos[1], dz = t.pos[2] - bolt.pos[2];
-    // Bodies are taller than they are wide, so the vertical miss distance is
-    // measured against a taller box. A bolt at chest height should not need to
-    // be level with the sternum.
-    if (Math.hypot(dx, dz) > reach || Math.abs(dy) > chest + spell.radius + 0.3) continue;
+    // Swept against the path taken this tick, not against the point it ended
+    // at — see `sweepHits`. A bolt is slower than an arrow and tunnels less,
+    // but "less" is not "not".
+    if (!sweepHits(was, bolt.pos, t, spell.radius)) continue;
     bolt.hit.add(t);
     struck.push(t);
     if (!spell.pierces) { bolt.life = 0; break; }

@@ -192,6 +192,37 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## Bows
+
+A bow is a *different verb* from a sword, and the reason to carry one is that
+it changes where you want to be standing. Three rules, the same three as
+everything else:
+
+- **A draw is a commitment.** Nocking and loosing take frames, exactly like a
+  swing, and being hit ends the draw.
+- **Dexterity is a wall.** Under a bow's requirement you cannot hold it at all.
+- **The skill buys the cone, not the damage.** A bow at 10% and a bow at 90%
+  hit for the same number when they hit. What changes is how wide the spread
+  is, so practice makes you *accurate* — and a novice's miss is a miss he can
+  watch and learn from.
+
+Measured hit rate against a standing wolf, aiming properly:
+
+| bow skill | 12 m | 24 m | 40 m |
+| --- | --- | --- | --- |
+| 0% | 78% | 17% | 5% |
+| 30% | 100% | 73% | 27% |
+| 60% | 100% | 100% | 63% |
+| 90% | 100% | 100% | 95% |
+
+Arrows are spent, they drop (about half a metre over twenty-five, two over
+fifty), and they are stopped by armour — which is exactly what armour is
+against, and the one thing a rune does not have to care about.
+
+The attack button uses the weapon in hand. There is no separate shoot key,
+because that would mean a player holding a bow has an attack button that does
+nothing.
+
 ## Magic
 
 The Chapter's path, and it is built on the same three rules as everything else.

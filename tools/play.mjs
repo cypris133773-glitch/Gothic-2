@@ -325,6 +325,38 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- a bow, through the same attack key ---------------------------------
+    // The attack button uses the weapon in hand. A separate shoot key would
+    // mean a player holding a bow has an attack button that does nothing.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      w.character.dex = 45; w.reloadout();
+      w.give('hunters_bow'); w.give('arrow', 10); w.equip('hunters_bow');
+    })()`);
+    await sleep(150);
+    const armed = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a bow is in hand', armed.bow && armed.bow.cls === 'bow', armed.bow ? armed.bow.name : 'none');
+    ok('with arrows', armed.bow.have === 10, `${armed.bow.have}`);
+
+    // Held, not tapped. The intent is sampled once per rendered frame, so a
+    // key that goes down and up inside one frame was never held at all — which
+    // is true of a real keyboard too and is why this is a hold.
+    await page.keyDown('KeyF');
+    await sleep(180);
+    const drawing = await page.evaluate('window.GRIMWARD.probeState()');
+    await page.keyUp('KeyF');
+    ok('F draws the bow', drawing.bow.drawing > 0, `${drawing.bow.drawing} frames left`);
+    ok('and it does not swing a sword instead', drawing.combat.state === 0,
+      `combat state ${drawing.combat.state}`);
+
+    await sleep(900);
+    const loosed = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the arrow is spent at the loose', loosed.bow.have === 9, `${loosed.bow.have} left`);
+    ok('no error from shooting', !(await page.evaluate('window.GRIMWARD.error || null')));
+
+    // Put the sword back so the rest of the run is unchanged.
+    await page.evaluate(`window.GRIMWARD.world.equip('branch')`);
+
     // --- dying, and the screen that says so ---------------------------------
     await page.evaluate(`(() => {
       const w = window.GRIMWARD.world;

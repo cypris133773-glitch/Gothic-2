@@ -166,6 +166,7 @@ async function boot() {
       weapon: world.inventory.weapon, armour: world.inventory.armour,
       book: tab,
       mana: world.caster.mana, manaMax: world.caster.max,
+      bow: world.bow(),
       casting: world.caster.casting, bolts: world.bolts.length,
       spells: world.spells().map((sp) => `${sp.id}${sp.ok ? '' : '!'}`),
       selectedSpell,
@@ -622,6 +623,10 @@ async function boot() {
         fight: `${STATE_NAME[pl.fighter.state]}${pl.fighter.t ? ` ${pl.fighter.t}` : ''}`
           + `  hp ${pl.fighter.hp}/${pl.fighter.maxHp}  combo ${pl.fighter.combo}`,
         hunt: `${world.beasts.filter((b) => b.state !== 7).length} alive  xp ${pl.xp}  level ${pl.level}`,
+        bow: world.bow()
+          ? `${world.bow().name}  ${world.bow().have} ${world.bow().ammo}s`
+            + `${world.bow().drawing ? `  drawing ${world.bow().drawing}` : ''}`
+          : '',
         mana: `${Math.floor(world.caster.mana)}/${world.caster.max} mana`
           + `${world.caster.casting ? `  casting ${SPELLS[world.caster.casting].short}` : ''}`
           + `${world.bolts.length ? `  ${world.bolts.length} in flight` : ''}`,

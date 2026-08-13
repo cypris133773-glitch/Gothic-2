@@ -8,7 +8,7 @@
 // So every weapon's `str` is a wall, the walls are spaced deliberately, and the
 // gap between them is what a trainer sells you.
 
-export const KIND = { WEAPON: 'weapon', ARMOUR: 'armour', POTION: 'potion', TROPHY: 'trophy', RUNE: 'rune', MISC: 'misc' };
+export const KIND = { WEAPON: 'weapon', ARMOUR: 'armour', POTION: 'potion', TROPHY: 'trophy', RUNE: 'rune', AMMO: 'ammo', MISC: 'misc' };
 
 export const ITEMS = {
   // --- weapons ---------------------------------------------------------------
@@ -31,6 +31,16 @@ export const ITEMS = {
   hunters_bow: {
     kind: KIND.WEAPON, name: 'Hunting bow', class: 'bow',
     damage: 30, dex: 25, value: 160,
+    note: 'The first bow. Dexterity is the wall; the skill buys the cone.',
+  },
+  war_bow: {
+    kind: KIND.WEAPON, name: 'War bow', class: 'bow',
+    damage: 52, dex: 45, value: 520,
+  },
+  crossbow: {
+    kind: KIND.WEAPON, name: 'Crossbow', class: 'crossbow',
+    damage: 70, dex: 40, value: 780,
+    note: 'Slower to load, flatter, harder, and it cares less who is holding it.',
   },
   forged_blade: {
     kind: KIND.WEAPON, name: 'Forged longsword', class: 'oneHanded',
@@ -97,6 +107,10 @@ export const ITEMS = {
 
   // --- misc ------------------------------------------------------------------
   lockpick: { kind: KIND.MISC, name: 'Lockpick', value: 12 },
+  // Arrows are consumed. A quiver that never empties turns the bow from a
+  // choice into a strictly better sword.
+  arrow: { kind: KIND.AMMO, name: 'Arrow', value: 2, stack: true },
+  bolt: { kind: KIND.AMMO, name: 'Crossbow bolt', value: 3, stack: true },
   ore_crate: { kind: KIND.MISC, name: 'Crate of blackore', value: 0, quest: true, unsellable: true },
   bandit_letter: { kind: KIND.MISC, name: 'Water-stained letter', value: 0, quest: true, unsellable: true },
   // The letter you carry past the gate guards. It is a quest item and it is
@@ -128,15 +142,16 @@ export const TRADERS = {
     gold: 900,
     stock: [
       ['rusty_blade', 2], ['militia_sword', 1], ['leather_jerkin', 1], ['lockpick', 5],
+      ['crossbow', 1], ['bolt', 60],
     ],
     // A smith buys metal and leather and nothing else. A trader who buys
     // everything is a wallet with a face.
-    buys: [KIND.WEAPON, KIND.ARMOUR, KIND.MISC],
+    buys: [KIND.WEAPON, KIND.ARMOUR, KIND.MISC, KIND.AMMO],
   },
   bosk_hunter: {
     gold: 420,
-    stock: [['hunters_bow', 1], ['healing_draught', 4]],
-    buys: [KIND.TROPHY, KIND.POTION],
+    stock: [['hunters_bow', 1], ['war_bow', 1], ['arrow', 80], ['healing_draught', 4]],
+    buys: [KIND.TROPHY, KIND.POTION, KIND.AMMO],
   },
   yorne_tavern: {
     gold: 260,

@@ -29,6 +29,10 @@ import {
   SPELLS, RUNE_SPELL, createCaster, syncCaster, canCast, beginCast, stepCaster,
   breakCast, createBolt, stepBolt, poseBolt,
 } from '../game/magic.js';
+import {
+  createArcher, canShoot, beginDraw, stepArcher, breakDraw, createArrow,
+  stepArrow, poseArrow, isRanged, BOWS, RANGED_CLASS,
+} from '../game/ranged.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
@@ -466,7 +470,11 @@ export function createWorld(opts = {}) {
   // has no mana and a rune has no reach. Both belong to the same man; neither
   // belongs to the other.
   const caster = createCaster(character);
-  // Bolts in flight, and the boxes that draw them.
+  // The archer, on the same footing: beside the fighter, not inside it.
+  const archer = createArcher();
+  // Bolts and arrows in flight, and the boxes that draw them. One list, because
+  // the two systems agree about what "something travelling" means and there is
+  // no reason for the world to hold two opinions.
   const bolts = [];
 
   // Props reach as far as the furthest landmark now: the island is 340 m across
@@ -676,7 +684,7 @@ export function createWorld(opts = {}) {
     seed, terrain, clock, player, camera, props, town, people, beasts, foes, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
-    caster, bolts,
+    caster, archer, bolts,
     // Death. `dead` is set the tick the player's fighter enters DEAD, and
     // `deadFor` counts up from there so the caller can hold the screen for a
     // moment before offering anything — being killed and being handed a menu in
@@ -917,6 +925,39 @@ export function createWorld(opts = {}) {
       world.dead = false; world.deadFor = 0;
       world.log.push(`You wake half a day later, ${lost} coin lighter.`);
       return { ok: true, at: [hx, hz], lost };
+    },
+
+    // --- shooting -----------------------------------------------------------
+
+    /** What the bow in hand is, if there is one. */
+    bow() {
+      const w = inventory.weapon ? ITEMS[inventory.weapon] : null;
+      if (!w || !isRanged(w.class)) return null;
+      const ammoId = w.class === 'crossbow' ? 'bolt' : 'arrow';
+      return {
+        id: inventory.weapon, name: w.name, cls: w.class,
+        damage: w.damage, ammo: ammoId, have: count(inventory, ammoId),
+        skill: character.skills[w.class] || 0,
+        drawing: archer.drawing ? archer.t : 0,
+      };
+    },
+
+    /**
+     * Draw and loose. Refuses with a reason, like every other door in this game.
+     *
+     * The arrow is spent at the *loose*, not at the draw — a draw you are
+     * knocked out of costs you the time and not the arrow, which is the right
+     * way round: the arrow is still nocked when you are hit.
+     */
+    shoot() {
+      const b = world.bow();
+      if (!b) return { ok: false, why: 'you are not holding a bow' };
+      const check = canShoot(b.cls, character, archer, b.have);
+      if (!check.ok) { world.log.push(check.why); return check; }
+      if (isStriking(player.fighter)) return { ok: false, why: 'both hands are busy' };
+      if (caster.casting) return { ok: false, why: 'both hands are busy' };
+      beginDraw(b.cls, archer);
+      return { ok: true, weapon: b.cls };
     },
 
     /** Take a door out of the world. Idempotent; the geometry only goes once. */
@@ -1259,7 +1300,18 @@ export function createWorld(opts = {}) {
       f.facing = player.yaw;
       const swinging = f.state === S.WINDUP || f.state === S.ACTIVE || f.state === S.STAGGER;
       if (swinging) { player.vel[0] *= 0.25; player.vel[2] *= 0.25; }
-      stepFighter(f, intent, rng);
+      // The attack button uses the weapon in hand. A separate "shoot" key would
+      // mean the player holding a bow has an attack button that does nothing,
+      // which is the sort of thing that reads as broken rather than as design.
+      const holdingBow = !!world.bow();
+      if (holdingBow) {
+        if (intent.attack && !archer.drawing) world.shoot();
+        // A drawn bow is a committed body, exactly like a swing.
+        if (archer.drawing) { player.vel[0] *= 0.35; player.vel[2] *= 0.35; }
+        stepFighter(f, { ...intent, attack: false }, rng);
+      } else {
+        stepFighter(f, intent, rng);
+      }
 
       for (const b of beasts) {
         stepBeast(b, player, terrain, dt, rng);
@@ -1272,7 +1324,25 @@ export function createWorld(opts = {}) {
           // Being hit ends a cast and keeps the mana. That is the only thing
           // that makes being interrupted matter, and it is why a mage learns to
           // cast from behind something.
-          if (landed) breakCast(caster);
+          if (landed) { breakCast(caster); breakDraw(archer); }
+        }
+      }
+
+      // --- shooting ------------------------------------------------------------
+      const loosed = stepArcher(archer);
+      if (loosed) {
+        const w = ITEMS[inventory.weapon];
+        const ammoId = loosed === 'crossbow' ? 'bolt' : 'arrow';
+        if (has(inventory, ammoId)) {
+          remove(inventory, ammoId);
+          bolts.push(createArrow(loosed, [
+            player.pos[0] + Math.sin(player.yaw) * 0.5,
+            player.pos[1] + 1.3,
+            player.pos[2] + Math.cos(player.yaw) * 0.5,
+          ], player.yaw, player.pitch * 0.7 + 0.012, w ? w.damage : 20, rng,
+          character.skills[loosed] || 0));
+        } else {
+          world.log.push('no arrows');
         }
       }
 
@@ -1293,14 +1363,20 @@ export function createWorld(opts = {}) {
           ], player.yaw, player.pitch * 0.6));
         }
       }
+      const inTheWay = [...beasts, ...foes];
       for (let i = bolts.length - 1; i >= 0; i--) {
         const bolt = bolts[i];
-        const struck = stepBolt(bolt, [...beasts, ...foes], terrain, dt);
+        const struck = bolt.arrow
+          ? stepArrow(bolt, inTheWay, terrain, dt)
+          : stepBolt(bolt, inTheWay, terrain, dt);
         for (const target of struck) {
-          const spell = SPELLS[bolt.spell];
-          // Magic ignores armour and cannot be parried. That is what a rune is
-          // *for*, and it is why the mana wall has to be a real one.
-          target.hp -= spell.damage;
+          // Magic ignores armour and cannot be parried — that is what a rune is
+          // *for*, and it is why the mana wall has to be a real one. An arrow
+          // does not get that: armour is exactly what armour is against.
+          const damage = bolt.arrow
+            ? Math.max(2, bolt.damage + Math.round(character.dex * 0.4) - (target.armor || 0))
+            : SPELLS[bolt.spell].damage;
+          target.hp -= damage;
           if (target.hp <= 0 && target.state !== S.DEAD) {
             target.hp = 0;
             target.state = S.DEAD;
@@ -1467,7 +1543,9 @@ export function createWorld(opts = {}) {
       }
       for (let i = 0; i < bolts.length; i++) {
         if (!boltParts[i]) boltParts[i] = {};
-        boxes.push(poseBolt(boltParts[i], bolts[i]));
+        boxes.push(bolts[i].arrow
+          ? poseArrow(boltParts[i], bolts[i])
+          : poseBolt(boltParts[i], bolts[i]));
       }
       return scene;
     },

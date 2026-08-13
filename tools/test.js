@@ -1226,6 +1226,116 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- shooting -----------------------------------------------------------------
+
+/** Shoot at a pinned target from `dist` metres and report the hit rate. */
+function volley(skill, dist, shots = 40) {
+  let hits = 0;
+  for (let k = 0; k < shots; k++) {
+    const w = createWorld({ seed: 100 + k, props: 0, beasts: 1, foes: false });
+    w.character.dex = 45; w.character.skills.bow = skill; w.reloadout();
+    w.give('hunters_bow'); w.give('arrow', 5); w.equip('hunters_bow');
+    const b = w.beasts[0];
+    b.def = { ...b.def, aggro: 0, speed: 0 };        // a target, not an opponent
+    w.player.pos[0] = b.pos[0]; w.player.pos[2] = b.pos[2] - dist;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.player.yaw = 0;
+    // Aim. A player looks at the thing and holds a little over it; a test that
+    // fires flat is measuring the ground, not the bow.
+    const rise = (b.pos[1] + 0.8) - (w.player.pos[1] + 1.3);
+    const drop = 0.5 * 6.5 * ((dist / 62) ** 2);
+    w.player.pitch = Math.atan2(rise + drop, dist) / 0.7;
+    const before = b.hp;
+    w.shoot();
+    for (let i = 0; i < 200 && b.hp === before; i++) w.tick(1 / 60);
+    if (b.hp < before) hits++;
+  }
+  return hits / shots;
+}
+
+check('a bow needs dexterity to hold and arrows to fire', () => {
+  const w = createWorld({ seed: 1, props: 0, beasts: 0, foes: false });
+  w.give('hunters_bow');
+  // Dexterity is a wall in exactly the way strength is (P3).
+  assert(!w.equip('hunters_bow').ok, 'a bow that needs 25 dex was drawn at 10');
+  w.character.dex = 25; w.reloadout();
+  assert(w.equip('hunters_bow').ok, 'twenty-five dexterity would not hold a 25-dex bow');
+
+  const empty = w.shoot();
+  assert(!empty.ok && /no arrows/.test(empty.why), `expected "no arrows", got "${empty.why}"`);
+  w.give('arrow', 2);
+  assert(w.shoot().ok, 'the bow would not draw with arrows in the pack');
+  assert(!w.shoot().ok, 'two draws at once');
+  // The arrow is spent at the loose, not at the draw.
+  eq(w.bow().have, 2, 'the arrow was spent before it was fired');
+  for (let i = 0; i < 60; i++) w.tick(1 / 60);
+  eq(w.bow().have, 1, 'the arrow was never spent');
+});
+
+check('bow skill buys the cone, not the damage', () => {
+  // The whole reason to train a bow. Measured rather than asserted, and the
+  // numbers are in the comment so the next person to touch the spread knows
+  // what they are changing.
+  //
+  //            12 m   24 m   40 m
+  //     0%      78%    17%     5%
+  //    30%     100%    73%    27%
+  //    60%     100%   100%    63%
+  //    90%     100%   100%    95%
+  const near0 = volley(0, 12), near90 = volley(90, 12);
+  assert(near90 >= near0, `training made a close shot worse: ${near0} → ${near90}`);
+
+  const far0 = volley(0, 40), far60 = volley(60, 40), far90 = volley(90, 40);
+  assert(far0 < 0.25, `an untrained archer hit ${(far0 * 100).toFixed(0)}% at forty metres`);
+  assert(far60 > far0 + 0.2, `sixty per cent bought nothing: ${far0} → ${far60}`);
+  assert(far90 > 0.7, `a master archer hit ${(far90 * 100).toFixed(0)}% at forty metres`);
+
+  // And the damage is the same number either way — it is a cone, not a bonus.
+  const w = createWorld({ seed: 3, props: 0, beasts: 1, foes: false });
+  w.character.dex = 45; w.reloadout();
+  w.give('hunters_bow'); w.give('arrow', 4); w.equip('hunters_bow');
+  const b = w.bow();
+  eq(b.damage, 30, 'the bow changed its own damage');
+});
+
+check('an arrow is stopped by armour and a bolt of fire is not', () => {
+  // A rune ignores armour; that is what a rune is for, and it is why the mana
+  // wall has to be real. An arrow does not get that.
+  const shootAt = (kind) => {
+    const w = createWorld({ seed: 7, props: 0, beasts: 6, foes: false });
+    w.character.dex = 45; w.character.skills.bow = 90; w.character.mana = 40;
+    w.reloadout();
+    w.give('hunters_bow'); w.give('arrow', 4); w.give('rune_fire_bolt');
+    const target = w.beasts.find((x) => x.kind === kind);
+    if (!target) return null;
+    target.def = { ...target.def, aggro: 0, speed: 0 };
+    w.player.pos[0] = target.pos[0]; w.player.pos[2] = target.pos[1] * 0 + target.pos[2] - 10;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.player.yaw = 0;
+    const rise = (target.pos[1] + 0.8) - (w.player.pos[1] + 1.3);
+    w.player.pitch = Math.atan2(rise + 0.09, 10) / 0.7;
+
+    w.equip('hunters_bow');
+    let before = target.hp;
+    w.shoot();
+    for (let i = 0; i < 200 && target.hp === before; i++) w.tick(1 / 60);
+    const byArrow = before - target.hp;
+
+    before = target.hp;
+    w.cast('fire_bolt');
+    for (let i = 0; i < 200 && target.hp === before; i++) w.tick(1 / 60);
+    const byBolt = before - target.hp;
+    return { byArrow, byBolt, armor: target.def.armor };
+  };
+
+  const boar = shootAt('boar');
+  if (boar && boar.byArrow > 0 && boar.byBolt > 0) {
+    eq(boar.byBolt, 46, 'the fire bolt was reduced by armour');
+    assert(boar.byArrow < boar.byBolt,
+      `an arrow did ${boar.byArrow} through ${boar.armor} armour and a bolt did ${boar.byBolt}`);
+  }
+});
+
 // --- dying --------------------------------------------------------------------
 
 check('dying stops the man, and waking up costs something', () => {

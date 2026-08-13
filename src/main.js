@@ -180,6 +180,7 @@ async function boot() {
       region: world.region, regionTitle: world.regionTitle,
       pendingTravel: world.pendingTravel,
       dead: world.dead, deadFor: world.deadFor,
+      finished: world.finished,
       sound: { on: sound.enabled, muted: sound.muted },
       title: atTitle,
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
@@ -343,6 +344,22 @@ async function boot() {
     shopMine.replaceChildren(...(selling.length
       ? selling.map((it, i) => row(`⇧${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.wanted))
       : [empty('Nothing here he deals in.')]));
+  }
+
+  // --- the end ------------------------------------------------------------------
+  const endedEl = document.getElementById('ended');
+  const endedBody = document.getElementById('ended-body');
+  let endShown = false;
+  function renderEnded() {
+    if (!world.finished || endShown) { endedEl.hidden = true; return; }
+    endedEl.hidden = false;
+    const c = world.character;
+    const order = { watch: 'the Watch', ember: 'the Ember Chapter', freeblade: 'the Freeblades' }[c.guild];
+    endedBody.textContent =
+      `A year of blackore went down that pit and none of it came back up as anything. `
+      + `It does not any more.\n\n`
+      + `${c.name}, level ${c.level}${order ? `, sworn to ${order}` : ', sworn to nobody'}, `
+      + `${world.seen.size} places found, on day ${world.clock.day}.`;
   }
 
   const talkEl = document.getElementById('talk');
@@ -628,6 +645,10 @@ async function boot() {
       return;
     }
 
+    // The ending takes one key and then gets out of the way. A finished game is
+    // a finished game, not a closed one: the island is still there.
+    if (world.finished && !endShown) { endShown = true; endedEl.hidden = true; return; }
+
     // Death takes the keyboard. Nothing else is offered because nothing else
     // is available: you load, or you wake up somewhere else and poorer.
     if (world.dead) {
@@ -818,6 +839,7 @@ async function boot() {
     // conversation, a debug call, a future vendor that opens on approach — gets
     // a screen, rather than only the one path that remembered to ask for one.
     if (shopEl.hidden !== !world.openTrader) renderShop();
+    if (world.finished && !endShown && endedEl.hidden) renderEnded();
 
     // Standing in an exit takes you through it. There is no prompt: the
     // barricade at the mouth of the pass is visible from a hundred metres and

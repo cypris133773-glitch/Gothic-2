@@ -385,6 +385,27 @@ mean anything.
 A member of one order cannot be given another's errand, and the test suite
 checks all nine combinations rather than the three that were written.
 
+## The end
+
+The game finishes. Taking the keep tells you where a year of blackore went —
+*down* — and walking into the deep pit finds who it went to. The last man is
+spawned when you arrive rather than pre-placed, so the valley is not haunted by
+a boss standing in a hole for forty hours before anybody has sent you.
+
+He plays by the same rules as everything else: same skeleton, same combat state
+machine, same parry window, same four frames of commitment. He is simply the
+best of them — he blocks more than he swings, takes a very long time to break,
+and hits hard enough that the fight is decided by whether you can make him
+commit. A boss with private rules throws away everything the player spent forty
+hours learning.
+
+Measured with the same spacing bot as the wood and the lighthouse: level 10
+dies in six seconds, level 17 wins with a quarter of his health, level 20 with
+a third. The endgame is somewhere around seventeen.
+
+Afterwards the island is still there. A finished game is a finished game, not a
+closed one.
+
 ## Chapters
 
 Four, and each one rewrites the map rather than adding to a list.

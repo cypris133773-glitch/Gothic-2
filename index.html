@@ -54,6 +54,14 @@
   </ul>
 </div>
 
+<!-- The end. Shown once, dismissed with any key, and the world keeps running
+     afterwards: a finished game is a finished game, not a closed one. -->
+<div id="ended" hidden>
+  <h2>It is finished</h2>
+  <p id="ended-body"></p>
+  <p class="ended-hint">Any key to go on walking</p>
+</div>
+
 <!-- Conversations are text, and text is what the DOM is for. The canvas draws
      the world; a talking-head panel over it is one element and reflows itself
      on a phone, which a canvas-drawn one would not. -->

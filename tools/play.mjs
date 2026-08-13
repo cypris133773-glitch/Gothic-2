@@ -468,6 +468,26 @@ async function main() {
     // Put the sword back so the rest of the run is unchanged.
     await page.evaluate(`window.GRIMWARD.world.equip('branch')`);
 
+    // --- the end ------------------------------------------------------------
+    // Finish the game the short way — the fight itself is measured in the logic
+    // suite — and check that the screen appears, says the right thing, and then
+    // gets out of the way. A finished game is a finished game, not a closed one.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      w.finished = true;
+    })()`);
+    await sleep(400);
+    ok('the ending appears', await page.evaluate('!document.getElementById("ended").hidden'));
+    ok('and says who finished it',
+      await page.evaluate('/level \\d/.test(document.getElementById("ended-body").textContent)'),
+      await page.evaluate('document.getElementById("ended-body").textContent.slice(-60)'));
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(250);
+    ok('and one key puts it away', await page.evaluate('document.getElementById("ended").hidden'));
+    ok('the island is still there',
+      await page.evaluate('(() => { const a = window.GRIMWARD.world.ticks; return new Promise((r) => setTimeout(() => r(window.GRIMWARD.world.ticks > a), 400)); })()'));
+    await page.evaluate('window.GRIMWARD.world.finished = false');
+
     // --- dying, and the screen that says so ---------------------------------
     await page.evaluate(`(() => {
       const w = window.GRIMWARD.world;

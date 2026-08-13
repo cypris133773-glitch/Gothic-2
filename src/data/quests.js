@@ -240,6 +240,22 @@ export const QUESTS = {
     order: ['told', 'counted', 'done'],
   },
 
+  // --- the end ------------------------------------------------------------------
+  q_end: {
+    title: 'What the ore is for',
+    giver: 'the keep, once it is yours',
+    chapter: 4,
+    stages: {
+      told: 'A year of blackore went into the keep and none of it came out as '
+        + 'anything. It went *down*. Take the deep road to the third pit.',
+      found: 'Somebody has been at the bottom of that pit for a year, and he '
+        + 'has been paid in ore. He is still there.',
+      done: 'It is finished. Whatever the ore was being made into, it is not '
+        + 'being made any more.',
+    },
+    order: ['told', 'found', 'done'],
+  },
+
   q_lighthouse: {
     title: 'The light on the headland',
     giver: 'Captain Aldric',

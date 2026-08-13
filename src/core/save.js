@@ -98,6 +98,11 @@ export function snapshot(world) {
     // What he has found. The map is drawn from it, so losing it on a reload
     // would un-discover the island.
     seen: [...(world.seen || [])],
+    // Whether the last man has been called down, and whether it is over. The
+    // first is needed so a reload does not summon him twice; the second so a
+    // finished game stays finished.
+    warden: !!world.wardenSpawned,
+    finished: !!world.finished,
     // Purses already lifted, likewise by id.
     robbed: (world.people || []).filter((p) => p.robbed).map((p) => p.id),
     // Men are saved by the same rule as beasts and for the same reason: a
@@ -185,6 +190,8 @@ export function restore(world, data) {
     world.seen.clear();
     for (const name of d.seen || []) world.seen.add(name);
   }
+  world.wardenSpawned = !!d.warden;
+  world.finished = !!d.finished;
   const robbed = new Set(d.robbed || []);
   for (const p of world.people || []) p.robbed = robbed.has(p.id);
   for (const m of d.foes || []) {

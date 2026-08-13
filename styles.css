@@ -209,3 +209,18 @@ html, body {
 #shop li.off .n, #shop li.off .m { color: #55503f; }
 #shop li.empty { color: #6e6552; font-style: italic; border: 0; }
 #shop-hint { padding: 12px 0 14px; font-size: 12px; color: #6e6552; border-top: 1px solid #33291c; margin-top: 10px; }
+
+/* The end. The same restraint as the death screen and the opposite colour. */
+#ended {
+  position: fixed; inset: 0; z-index: 9;
+  display: grid; place-content: center; gap: 16px; text-align: center; padding: 24px;
+  background: radial-gradient(ellipse at center, rgba(24, 20, 8, 0.76), rgba(3, 3, 2, 0.95));
+  animation: died-in 1600ms ease-out both;
+}
+#ended[hidden] { display: none; }
+#ended h2 {
+  font-size: 22px; font-weight: 400; letter-spacing: 0.30em;
+  text-transform: uppercase; color: #c8a45c;
+}
+#ended p { color: #b9ad92; font-size: 14px; max-width: 52ch; line-height: 1.7; }
+#ended .ended-hint { color: #6e6552; font-size: 12px; }

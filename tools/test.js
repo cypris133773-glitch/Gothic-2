@@ -1069,8 +1069,13 @@ check('the valley can be played to the end of it', () => {
   eq(w.quests.get('q_keep'), 'done', 'an empty keep did not count as taken');
 
   assert(w.character.level >= 3, `the valley paid ${w.character.xp} xp — level ${w.character.level}`);
+  // Taking the keep opens the last one, so "everything finished" is now
+  // "everything finished except the one the keep just started".
   const log = w.questLog();
-  assert(log.length >= 3 && log.every((q) => q.finished), 'the valley left something open');
+  const open = log.filter((q) => !q.finished);
+  assert(log.length >= 4, `only ${log.length} quests in the valley log`);
+  eq(open.length, 1, `the valley left ${open.map((q) => q.title).join(', ')} open`);
+  eq(open[0].id, 'q_end', `the open one is ${open[0].id}`);
 });
 
 check('each order sends you somewhere different, and only its own members', () => {
@@ -1226,6 +1231,103 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(!early.won, `a level-${early.level} character cleared the lighthouse — it is not a wall`);
   const ready = run(30000, 50, 70, 'forged_blade', 'watch_mail');
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
+});
+
+// --- the end ------------------------------------------------------------------
+
+check('the game can be finished, and the last man plays by the same rules', () => {
+  const w = createWorld({ seed: 3, region: 'cleftvale', props: 20, beasts: 0 });
+  w.chapter = 4;
+
+  // Taking the keep is what tells you where the ore went.
+  w.setQuest('q_keep', 'done');
+  w.tick(1 / 60);
+  eq(w.quests.get('q_end'), 'told', 'the keep told him nothing');
+
+  // He is spawned rather than pre-placed, so the valley is not haunted by a
+  // boss standing in a hole for forty hours before anybody is sent.
+  assert(!w.foes.some((m) => m.def.boss), 'the last man was waiting before he was called');
+  const pit = w.places.pit_three.at;
+  w.player.pos[0] = pit[0]; w.player.pos[2] = pit[1] + 10;
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  w.tick(1 / 60);
+  eq(w.quests.get('q_end'), 'found', 'nothing was down there');
+  const boss = w.foes.find((m) => m.def.boss);
+  assert(boss, 'the last man never turned up');
+
+  // Same skeleton, same state machine, same parry window. A boss with private
+  // rules throws away everything the player spent forty hours learning.
+  eq(boss.weapon.windup, 18, 'the Warden has his own frame counts');
+  assert(boss.kit, 'and no clothes');
+  assert(w.foes.filter((m) => m.def.boss).length === 1, 'two of him');
+
+  // He does not come alone, and it is not over while he is standing.
+  assert(w.foes.filter((m) => m.state !== S.DEAD).length >= 4, 'he came alone');
+  for (const m of w.foes) if (!m.def.boss) { m.state = S.DEAD; m.hp = 0; }
+  w.tick(1 / 60);
+  assert(!w.finished, 'the game ended with the last man still on his feet');
+
+  boss.state = S.DEAD; boss.hp = 0;
+  w.tick(1 / 60);
+  eq(w.quests.get('q_end'), 'done', 'killing him finished nothing');
+  assert(w.finished, 'the game did not end');
+  assert(w.character.xp >= 6000, `the ending paid ${w.character.xp} xp`);
+
+  // A finished game stays finished, and the island is still there.
+  const data = w.snapshot();
+  assert(data.finished && data.warden, 'the save forgot the ending');
+  const w2 = createWorld({ seed: 3, region: 'cleftvale', props: 20, beasts: 0 });
+  w2.restore(data);
+  assert(w2.finished, 'the ending un-happened on load');
+  w2.tick(1 / 60);
+  assert(!w2.foes.some((m) => m.def.boss && m.state !== S.DEAD), 'he came back');
+});
+
+check('the last man is a fight, not a wall', () => {
+  // Measured with the same spacing bot as the wood and the lighthouse:
+  //
+  //   level 10   dies in six seconds
+  //   level 17   wins with a quarter of his health
+  //   level 20   wins with a third
+  //
+  // The assertion is pinned at the ends, because the middle is where the
+  // interesting variance lives and a test should not depend on it.
+  const run = (xp, str, skill) => {
+    const w = createWorld({ seed: 3, region: 'cleftvale', props: 10, beasts: 0, foes: false });
+    w.chapter = 4; w.character.guild = 'watch';
+    w.awardXp(xp, 'quest'); w.character.str = str; w.character.skills.oneHanded = skill;
+    w.give('forged_blade'); w.give('watch_mail'); w.equip('forged_blade'); w.equip('watch_mail');
+    w.player.fighter.hp = w.character.maxHp;
+    w.setQuest('q_keep', 'done'); w.tick(1 / 60);
+    const pit = w.places.pit_three.at;
+    w.player.pos[0] = pit[0]; w.player.pos[2] = pit[1] + 18;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    w.tick(1 / 60);
+    const intent = idleIntent();
+    for (let t = 0; t < 60 * 400 && w.player.fighter.hp > 0 && !w.finished; t++) {
+      const near = w.foes.filter((m) => m.state !== S.DEAD)
+        .map((m) => ({ m, d: Math.hypot(m.pos[0] - w.player.pos[0], m.pos[2] - w.player.pos[2]) }))
+        .sort((a, b) => a.d - b.d)[0];
+      intent.attack = false; intent.block = false; intent.forward = 0; intent.turn = 0;
+      if (near) {
+        const want = Math.atan2(near.m.pos[0] - w.player.pos[0], near.m.pos[2] - w.player.pos[2]);
+        let d = want - w.player.yaw;
+        while (d > Math.PI) d -= Math.PI * 2;
+        while (d < -Math.PI) d += Math.PI * 2;
+        intent.turn = Math.max(-4, Math.min(4, d * 6));
+        intent.forward = near.d > 1.9 ? 1 : 0;
+        intent.block = near.m.state === S.WINDUP && near.d < 2.6;
+        intent.attack = !intent.block && near.d < 2.0;
+      }
+      w.tick(1 / 60, intent);
+    }
+    return { won: w.finished, level: w.character.level };
+  };
+
+  const early = run(30000, 50, 70);
+  assert(!early.won, `a level-${early.level} character finished the game — it is not a wall`);
+  const late = run(140000, 90, 100);
+  assert(late.won, `a level-${late.level} character could not finish it — it is a wall`);
 });
 
 // --- trading ------------------------------------------------------------------

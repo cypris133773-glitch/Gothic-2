@@ -805,6 +805,9 @@ export function createWorld(opts = {}) {
     // moment before offering anything — being killed and being handed a menu in
     // the same frame reads as a bug rather than as a death.
     dead: false, deadFor: 0,
+    // The end. Set once, and never unset: a finished game stays finished, and
+    // the player is free to keep walking around the island afterwards.
+    finished: false, wardenSpawned: false,
     region: regionName, regionTitle: R.title,
     // Set when the player is standing in an exit and may use it. The world
     // cannot replace itself, so travelling is the caller's job: main.js reads
@@ -1473,6 +1476,43 @@ export function createWorld(opts = {}) {
         if (!held) {
           world.setQuest('q_lighthouse', 'done');
           world.awardXp(1200, 'quest');
+        }
+      }
+
+      // --- the end ---------------------------------------------------------
+      //
+      // Taking the keep is what tells you where the ore went; walking into the
+      // deep pit is what finds who it went to. Both follow the rule the whole
+      // game follows — a place in the world, reached on foot — and the last man
+      // is spawned rather than pre-placed so that the valley is not haunted by
+      // a boss standing in a hole for forty hours before anybody is sent.
+      if (regionName === 'cleftvale') {
+        if (quests.get('q_keep') === 'done' && !flags.has('quest:q_end:told')) {
+          world.setQuest('q_end', 'told');
+        }
+        if (flags.has('quest:q_end:told') && !world.wardenSpawned) {
+          const pit = terrain.places.pit_three.at;
+          if (Math.hypot(player.pos[0] - pit[0], player.pos[2] - pit[1]) < 26) {
+            world.wardenSpawned = true;
+            const wrng = makeRng(seed * 40961 + 7);
+            const boss = createFoe('warden', pit[0], pit[1] - 6, terrain, wrng);
+            foes.push(boss); foeParts.push([]);
+            for (let i = 0; i < 3; i++) {
+              const a = (i / 3) * Math.PI * 2;
+              const g = createFoe('keeper', pit[0] + Math.cos(a) * 9, pit[1] + Math.sin(a) * 9, terrain, wrng);
+              foes.push(g); foeParts.push([]);
+            }
+            world.setQuest('q_end', 'found');
+            world.log.push('Somebody is down here, and he has been paid in ore.');
+          }
+        }
+        if (quests.get('q_end') === 'found'
+          && !foes.some((m) => m.def.boss && m.state !== S.DEAD)
+          && world.wardenSpawned) {
+          world.setQuest('q_end', 'done');
+          world.awardXp(6000, 'quest');
+          world.finished = true;
+          world.log.push('It is finished.');
         }
       }
 

@@ -49,6 +49,27 @@ export const FOES = {
     kit: 'watch', rest: 36, blockChance: 0.62,
     drops: [{ item: 'forged_blade', chance: 0.2 }, { item: 'strong_draught', chance: 0.5 }],
   },
+  /**
+   * The last man, at the bottom of the deep pit.
+   *
+   * He is not a different *kind* of thing — same skeleton, same state machine,
+   * same four frames of parry window — because the whole promise of this combat
+   * system is that what you learned on a wolf still applies at the end. He is
+   * simply the best of them: he blocks more than he swings, he takes a very long
+   * time to break, and he hits hard enough that the fight is decided by whether
+   * you can make him commit.
+   *
+   * A boss with private rules is a boss that throws away everything the player
+   * spent forty hours learning.
+   */
+  warden: {
+    name: 'The Warden',
+    hp: 950, armor: 56, str: 62, skill: 84, poise: 170, weapon: 'twoHanded',
+    speed: 4.1, aggro: 30, keepOut: 2.3, xp: 4000, gold: [400, 900],
+    kit: 'knight', rest: 30, blockChance: 0.7,
+    drops: [{ item: 'war_axe', chance: 1 }, { item: 'elixir_str', chance: 1 }],
+    boss: true,
+  },
 };
 
 export function createFoe(kind, x, z, terrain, rng = Math.random) {

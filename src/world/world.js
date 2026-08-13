@@ -219,7 +219,16 @@ function buildOutlands(terrain, seed) {
   ];
   for (let i = 0; i < farms.length; i++) {
     const [key, look] = farms[i];
-    const [x, z] = PLACES[key].at;
+    const [cx, cz] = PLACES[key].at;
+    // The buildings sit *beside* the yard, not on it. A farm placed on the
+    // centre of its own pad puts the longhouse in the middle of the road that
+    // serves it — which is exactly where the full-playthrough bot walked into
+    // one and stayed for forty minutes. The offset is directly away from
+    // whatever the farm faces, so the lane still runs through the yard in
+    // front of the house, which is where a lane belongs.
+    const away = Math.hypot(cx - look[0], cz - look[1]) || 1;
+    const x = cx + ((cx - look[0]) / away) * 9;
+    const z = cz + ((cz - look[1]) / away) * 9;
     boxes.push(...buildFarm(x, z, g(x, z), facing(x, z, look), seed + i * 31));
   }
 

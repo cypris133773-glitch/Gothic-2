@@ -34,6 +34,7 @@ import { DIALOGUE, SPEAKERS } from '../src/data/dialogue.js';
 import { readFileSync } from 'node:fs';
 import { snapshot, restore, migrate, SAVE_VERSION, MIGRATIONS, createStorage } from '../src/core/save.js';
 import { goldenPath } from './sim.mjs';
+import { fullPlaythrough } from './finish.mjs';
 import { ITEMS, TRADERS, DROPS, KIND } from '../src/data/items.js';
 import { buyPrice, sellPrice } from '../src/game/inventory.js';
 
@@ -1234,6 +1235,27 @@ check('a bandit is a real fight and the curve is where the design says', () => {
 });
 
 // --- the end ------------------------------------------------------------------
+
+check('the whole game can be played from the first line to the last', () => {
+  // The single most valuable assertion in the project: a bot walks, talks,
+  // fights and crosses the pass from a new character to `world.finished`. Five
+  // seconds of wall clock for five minutes of game, and it exercises `travel`
+  // and the whole persist/adopt path as a side effect.
+  //
+  // It found four real bugs on its first run, none of which any unit test could
+  // have: a Watch member was never sent to Ossric so chapter three was
+  // unreachable for a third of players, farm buildings sat on the road that
+  // serves them, keep guards stood one centimetre outside a one-handed
+  // weapon's reach and could not be hit at all, and a conversation's options
+  // are computed when it opens so a line unlocked *during* it is invisible.
+  const r = fullPlaythrough(1, { maxSeconds: 1800 });
+  assert(r.ok, `${r.why} — got as far as: ${r.steps.slice(-3).join(' · ')}`);
+  assert(r.world.finished, 'the bot reached the end without the game ending');
+  eq(r.world.chapter, 4, 'it finished in the wrong chapter');
+  eq(r.world.region, 'cleftvale', 'it finished in the wrong world');
+  assert(r.world.character.level >= 18, `finished at level ${r.world.character.level}`);
+});
+
 
 check('the game can be finished, and the last man plays by the same rules', () => {
   const w = createWorld({ seed: 3, region: 'cleftvale', props: 20, beasts: 0 });

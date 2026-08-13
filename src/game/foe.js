@@ -45,7 +45,12 @@ export const FOES = {
   keeper: {
     name: 'Keep guard',
     hp: 190, armor: 38, str: 42, skill: 62, poise: 80, weapon: 'oneHanded',
-    speed: 4.0, aggro: 24, keepOut: 2.0, xp: 420, gold: [60, 160],
+    // keepOut is *inside* a one-handed weapon's 1.9 m reach on purpose. At 2.0
+    // the keep guards stood exactly one centimetre further away than the player
+    // could swing, and a bot that closes only to contact never landed a blow —
+    // six of them and a level-nineteen character deadlocked for an hour. A foe
+    // who will not come inside your reach is a foe you cannot fight.
+    speed: 4.0, aggro: 24, keepOut: 1.8, xp: 420, gold: [60, 160],
     kit: 'watch', rest: 36, blockChance: 0.62,
     drops: [{ item: 'forged_blade', chance: 0.2 }, { item: 'strong_draught', chance: 0.5 }],
   },

@@ -102,11 +102,18 @@ export function goldenPath(seed, { maxSeconds = 900, verbose = false } = {}) {
    */
   const legs = new Map();
   function walkVia(name, points, within = 2.0) {
+    // A route that is finished stays finished. Re-checking the last leg every
+    // tick turns it into a *leash*: the caller walks on toward whatever it
+    // actually wanted, the distance back to the waypoint grows past `within`,
+    // the route claims to be unfinished again and drags it back. The bot stood
+    // six metres from the man it was trying to talk to for forty minutes,
+    // oscillating, with nothing in the way and nothing to fight.
+    if (legs.get(name) === 'done') return true;
     let i = legs.get(name) ?? 0;
     const last = points.length - 1;
     const [x, z] = points[i];
-    if (walkTo(x, z, i === last ? within : 3.0)) {
-      if (i === last) return true;
+    if (walkTo(x, z, i === last ? within : 3.2)) {
+      if (i === last) { legs.set(name, 'done'); return true; }
       legs.set(name, ++i);
     }
     return false;

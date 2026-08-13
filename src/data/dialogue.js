@@ -502,6 +502,21 @@ export const DIALOGUE = {
         { kind: 'gold', amount: 300 },
       ],
     },
+    // The Watch's road to the plateau. Kelm and Sarn each had one of these and
+    // Aldric did not, so a man sworn to the Watch was never sent to Ossric and
+    // chapter three was unreachable for a third of the game's players. The
+    // full-playthrough bot found it by sitting in front of the captain for
+    // forty minutes with nothing left to say.
+    {
+      id: 'aldric.ossric',
+      when: (c) => c.guild === 'watch' && c.chapter >= 2 && !c.has('quest:q_tower:told'),
+      text: 'Who else has been writing to the governor about the ore?',
+      reply: 'One man, eleven times, from a tower on the plateau, and I read four '
+        + 'of them before I was told to stop. Go and ask him what he thinks is '
+        + 'happening, and come back before you believe any of it.',
+      once: true,
+      effects: [{ kind: 'quest', quest: 'q_tower', stage: 'told' }],
+    },
     {
       id: 'aldric.lighthouse',
       when: (c) => c.guild === 'watch' && c.chapter >= 3 && !c.has('quest:q_lighthouse:told'),

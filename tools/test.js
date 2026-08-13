@@ -1228,6 +1228,49 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- the map ------------------------------------------------------------------
+
+check('the map is drawn from the world, and shows only what you have found', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w.tick(1 / 60);
+  // He starts in the city, so the city is on it and nothing else is.
+  assert(w.seen.has('halden'), 'he cannot see the city he is standing in');
+  eq(w.seen.size, 1, `a new character has already found ${[...w.seen].join(', ')}`);
+
+  // Standing *inside* a place is what finds it. Walking past at two hundred
+  // metres is not, which is the rule that makes a map worth opening twice.
+  const far = w.places.lighthouse.at;
+  w.player.pos[0] = far[0] + 60; w.player.pos[2] = far[1];
+  w.tick(1 / 60);
+  assert(!w.seen.has('lighthouse'), 'sixty metres away counted as finding it');
+
+  w.player.pos[0] = far[0]; w.player.pos[2] = far[1];
+  w.tick(1 / 60);
+  assert(w.seen.has('lighthouse'), 'standing on it did not');
+
+  // And it survives a reload, or the island un-discovers itself.
+  const data = w.snapshot();
+  assert(data.seen.includes('lighthouse'), 'the save forgot what he had found');
+  const w2 = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w2.restore(data);
+  assert(w2.seen.has('lighthouse'), 'the map went blank on load');
+});
+
+check('every place on the map can actually be walked to', () => {
+  // A place that cannot be entered can never be discovered, so it would sit on
+  // the map as a name nobody can reach. Standing on each one and ticking is the
+  // cheapest proof that all of them are real ground.
+  for (const region of Object.keys(REGIONS)) {
+    const w = createWorld({ seed: 2, region, props: 20, beasts: false, foes: false });
+    for (const [name, p] of Object.entries(w.places)) {
+      w.player.pos[0] = p.at[0]; w.player.pos[2] = p.at[1];
+      w.player.pos[1] = w.terrain.heightAt(p.at[0], p.at[1]);
+      for (let i = 0; i < 4; i++) w.tick(1 / 60);
+      assert(w.seen.has(name), `${region}/${name} cannot be stood in — it is on the map and unreachable`);
+    }
+  }
+});
+
 // --- the day ------------------------------------------------------------------
 
 check('a routine is a clock, not a script', () => {

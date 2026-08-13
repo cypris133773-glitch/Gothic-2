@@ -89,17 +89,20 @@ export function snapshot(world) {
       .map((b) => ({
         i: world.beasts.indexOf(b), hp: b.hp, dead: b.state === 7, pos: [...b.pos],
       })),
-    // Men are saved by the same rule and for the same reason: a lighthouse you
-    // cleared has to stay cleared, or the quest that depends on it un-finishes
-    // itself the moment you reload.
     // Chests you emptied stay empty, which is the only reason a player bothers
     // to remember where one was. Stored by id rather than by index, because a
     // chest is authored by hand and a list of them will be reordered.
     chests: (world.chests || [])
       .filter((c) => c.open || c.emptied)
       .map((c) => ({ id: c.id, open: c.open, emptied: c.emptied })),
+    // What he has found. The map is drawn from it, so losing it on a reload
+    // would un-discover the island.
+    seen: [...(world.seen || [])],
     // Purses already lifted, likewise by id.
     robbed: (world.people || []).filter((p) => p.robbed).map((p) => p.id),
+    // Men are saved by the same rule as beasts and for the same reason: a
+    // lighthouse you cleared has to stay cleared, or the quest that depends on
+    // it un-finishes itself the moment you reload.
     foes: (world.foes || [])
       .filter((m) => m.state === 7 || m.hp < m.maxHp)
       .map((m) => ({
@@ -177,6 +180,10 @@ export function restore(world, data) {
     chest.open = c.open;
     chest.emptied = c.emptied;
     if (chest.open) chest.picked = 1e9;
+  }
+  if (world.seen) {
+    world.seen.clear();
+    for (const name of d.seen || []) world.seen.add(name);
   }
   const robbed = new Set(d.robbed || []);
   for (const p of world.people || []) p.robbed = robbed.has(p.id);

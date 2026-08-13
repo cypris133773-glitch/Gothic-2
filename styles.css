@@ -154,3 +154,32 @@ html, body {
 #title-menu li.off b { color: #55503f; }
 #title-keys { color: #6e6552; font-size: 12px; line-height: 1.9; margin-top: 6px; }
 #title-keys b { color: #8a8171; font-weight: 400; }
+
+/* The map. Drawn from the same `places` and `roads` the heightfield carves the
+   ground from, so it cannot disagree with the world it describes. */
+.map {
+  /* Square, and never taller than the panel it lives in. Sized by the smaller
+     of the two constraints so the whole island is on screen: the first version
+     was width-driven and cut the farms and the player's own arrow off the
+     bottom of a panel that scrolls. */
+  width: min(100%, 50vh);
+  aspect-ratio: 1;
+  height: auto;
+  display: block;
+  margin: 0 auto;
+}
+.map-sea { fill: #0d1a24; }
+.map-rock { fill: #131110; }
+.map-land { fill: #1b1810; }
+.map-road { fill: none; stroke: #4a3f2c; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; }
+.map-place { fill: #6e6552; stroke: #0b0a08; stroke-width: 1.5; }
+.map-city { fill: #c8a45c; }
+.map-temple { fill: #a3572f; }
+.map-tower { fill: #6a4a86; }
+.map-pass, .map-keep { fill: #a3392f; }
+.map-mine { fill: #7d7466; }
+.map-label {
+  fill: #8a8171; font-size: 9px; text-anchor: middle;
+  font-family: ui-monospace, Menlo, Consolas, monospace; letter-spacing: 0.04em;
+}
+.map-you { fill: #9ad07a; stroke: #0b0a08; stroke-width: 1.2; }

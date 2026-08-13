@@ -345,6 +345,19 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- the map ------------------------------------------------------------
+    await page.keyDown('KeyN'); await page.keyUp('KeyN');
+    await sleep(200);
+    const mapped = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('N opens the map', mapped.book === 'map', `tab ${mapped.book}`);
+    ok('and the city is on it', mapped.seen.includes('halden'), mapped.seen.join(', '));
+    ok('drawn from the world rather than from an image',
+      await page.evaluate('!!document.querySelector("#book-body svg.map .map-road")'));
+    ok('with him on it',
+      await page.evaluate('!!document.querySelector("#book-body svg.map .map-you")'));
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(120);
+
     // --- sound, which needs a gesture ----------------------------------------
     // Every browser suspends an AudioContext made before the user has touched
     // the page, so the graph is built on the first key. By now the run has

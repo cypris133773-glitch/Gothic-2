@@ -186,6 +186,7 @@ async function boot() {
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
       book: tab,
+      seen: [...world.seen],
       mana: world.caster.mana, manaMax: world.caster.max,
       bow: world.bow(),
       chest: (() => {
@@ -464,6 +465,78 @@ async function boot() {
     bodyEl.replaceChildren(...out);
   }
 
+  /**
+   * The map.
+   *
+   * Drawn as SVG from the region's own `places` and `roads` — the same data the
+   * heightfield carves the ground from — so it can never disagree with the
+   * world it describes. There is no separate map asset and there is no map
+   * authoring step: move a farm and the map moves.
+   *
+   * Places you have not been to are not on it. That is the one rule that makes
+   * a map worth opening twice, and it is why `seen` is world state rather than
+   * a drawing option.
+   */
+  function renderMap() {
+    actions = [];
+    const T = world.terrain;
+    const size = T.size / 2;
+    const NS = 'http://www.w3.org/2000/svg';
+    const svg = document.createElementNS(NS, 'svg');
+    const span = 200;                     // metres shown either side of the origin
+    svg.setAttribute('viewBox', `${-span} ${-span} ${span * 2} ${span * 2}`);
+    svg.setAttribute('class', 'map');
+
+    const node = (kind, attrs) => {
+      const n = document.createElementNS(NS, kind);
+      for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, String(v));
+      return n;
+    };
+
+    // The sea, or the valley floor: one rounded rectangle under everything.
+    svg.append(node('rect', {
+      x: -span, y: -span, width: span * 2, height: span * 2,
+      rx: 14, class: T.water ? 'map-sea' : 'map-rock',
+    }));
+    svg.append(node('circle', { cx: 0, cy: 0, r: size * 0.74, class: 'map-land' }));
+
+    // Roads first, so places sit on top of them.
+    for (const road of T.roads) {
+      const d = road.points.map((p, i) => `${i ? 'L' : 'M'}${p[0]} ${p[1]}`).join(' ');
+      svg.append(node('path', { d, class: 'map-road' }));
+    }
+
+    // Places, but only the ones he has actually stood near.
+    for (const [name, p] of Object.entries(T.places)) {
+      if (!world.seen.has(name)) continue;
+      svg.append(node('circle', { cx: p.at[0], cy: p.at[1], r: Math.max(5, p.r * 0.32), class: `map-place map-${p.kind}` }));
+      const label = node('text', { x: p.at[0], y: p.at[1] - Math.max(9, p.r * 0.32 + 5), class: 'map-label' });
+      label.textContent = name.replace(/_/g, ' ');
+      svg.append(label);
+    }
+
+    // Him. A wedge rather than a dot, because which way you are facing is half
+    // of what a map is for.
+    const px = world.player.pos[0], pz = world.player.pos[2];
+    const yaw = world.player.yaw;
+    const tip = [px + Math.sin(yaw) * 13, pz + Math.cos(yaw) * 13];
+    const l = [px + Math.sin(yaw + 2.5) * 8, pz + Math.cos(yaw + 2.5) * 8];
+    const r2 = [px + Math.sin(yaw - 2.5) * 8, pz + Math.cos(yaw - 2.5) * 8];
+    svg.append(node('path', {
+      d: `M${tip[0]} ${tip[1]} L${l[0]} ${l[1]} L${px} ${pz} L${r2[0]} ${r2[1]} Z`,
+      class: 'map-you',
+    }));
+
+    const out = [el('h3', null, `${world.regionTitle}  —  ${world.seen.size} places found`)];
+    out.push(svg);
+    const dl = el('dl');
+    dl.append(el('dt', null, 'You are at'), el('dd', null, `${px.toFixed(0)}, ${pz.toFixed(0)}`));
+    dl.append(el('dt', null, 'Day'), el('dd', null, `${world.clock.day}, ${world.clock.hhmm}`));
+    out.push(dl);
+    hintEl.textContent = 'Places appear once you have been near them · C/I/J/K/N switch · Esc closes';
+    bodyEl.replaceChildren(...out);
+  }
+
   function renderLog() {
     const rows = world.questLog();
     actions = [];
@@ -497,7 +570,7 @@ async function boot() {
     for (const b of tabsEl.querySelectorAll('button')) {
       b.setAttribute('aria-selected', String(b.dataset.tab === tab));
     }
-    ({ sheet: renderSheet, pack: renderPack, log: renderLog, runes: renderRunes })[tab]();
+    ({ sheet: renderSheet, pack: renderPack, log: renderLog, runes: renderRunes, map: renderMap })[tab]();
   }
   const openBook = (which) => { tab = tab === which ? null : which; renderBook(); };
   api.book = { open: openBook, get tab() { return tab; }, render: renderBook };
@@ -529,6 +602,7 @@ async function boot() {
       if (e.code === 'KeyI') { openBook('pack'); return; }
       if (e.code === 'KeyJ') { openBook('log'); return; }
       if (e.code === 'KeyK') { openBook('runes'); return; }
+      if (e.code === 'KeyN') { openBook('map'); return; }
       const n = Number(e.key);
       if (n >= 1 && n <= 9 && actions[n - 1]) {
         const r = actions[n - 1].do();
@@ -563,6 +637,7 @@ async function boot() {
     if (e.code === 'KeyI') { openBook('pack'); return; }
     if (e.code === 'KeyJ') { openBook('log'); return; }
     if (e.code === 'KeyK') { openBook('runes'); return; }
+    if (e.code === 'KeyN') { openBook('map'); return; }
     if (e.code === 'KeyM') { log(sound.toggle() ? 'muted' : 'sound on'); return; }
     if (e.code === 'F5') { e.preventDefault(); save('manual'); }
     if (e.code === 'F9') { e.preventDefault(); load('manual'); }

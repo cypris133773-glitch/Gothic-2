@@ -746,6 +746,7 @@ export function createWorld(opts = {}) {
   // face it hit, so it wants a velocity. A person being placed has none, and
   // giving every townsperson a velocity vector they never use would be worse
   // than lending them a zeroed one for the length of this loop.
+  const seen = new Set();
   const placing = { pos: null, vel: new Float32Array(3) };
   for (const p of people) {
     placing.pos = p.pos;
@@ -794,6 +795,10 @@ export function createWorld(opts = {}) {
     seed, terrain, clock, player, camera, props, town, people, beasts, foes, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
+    // Which places he has actually stood near. The map draws only these, which
+    // is the one rule that makes a map worth opening twice — and it is world
+    // state rather than a drawing option, because it has to be saved.
+    seen,
     caster, archer, bolts, chests,
     // Death. `dead` is set the tick the player's fighter enters DEAD, and
     // `deadFor` counts up from there so the caller can hold the screen for a
@@ -1739,6 +1744,18 @@ export function createWorld(opts = {}) {
       }
       if (intent.steal && !world.stealHeld) world.pickPocket();
       world.stealHeld = !!intent.steal;
+
+      // Discovery. Standing inside a place's own pad is what puts it on the
+      // map; walking past at two hundred metres is not. Cheap enough to do
+      // every tick because a region has fewer than a dozen places in it.
+      for (const [name, p] of Object.entries(terrain.places)) {
+        if (seen.has(name)) continue;
+        const rx = p.w || p.r, rz = p.r;
+        if (Math.hypot((player.pos[0] - p.at[0]) / rx, (player.pos[2] - p.at[1]) / rz) < 1.05) {
+          seen.add(name);
+          world.log.push(`Found: ${name.replace(/_/g, ' ')}`);
+        }
+      }
 
       // A lock you walked away from is a lock you have to start again. Kept
       // here rather than in the key handler so that it is true of a bot and of

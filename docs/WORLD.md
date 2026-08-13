@@ -192,6 +192,21 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## The map
+
+Drawn as SVG from the region's own `places` and `roads` — the same data the
+heightfield carves the ground from — so it cannot disagree with the world it
+describes. There is no map asset and no map authoring step: move a farm and the
+map moves with it.
+
+Places you have not been to are not on it. Standing *inside* a place's own pad
+is what finds it; walking past at sixty metres is not. That is the one rule
+that makes a map worth opening twice, and it is why what you have found is
+world state that gets saved rather than a drawing option — an island that
+un-discovers itself on reload is worse than no map.
+
+**N** opens it.
+
 ## The day
 
 Everybody in the city stood on the same square metre from the moment the world

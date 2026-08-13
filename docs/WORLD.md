@@ -192,6 +192,31 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## Sound
+
+There are no audio files in this project and there are not going to be: the
+same rule that makes every texture a function makes every sound one. A footstep
+is a filtered noise burst with an envelope; a blade on mail is two of them a few
+milliseconds apart with a metallic partial over the top; a parry is a ringing
+tone. All of it is a hundred lines of WebAudio and none of it is a download.
+
+Three things shape it:
+
+- **The simulation cannot hear itself.** Nothing in `src/game` or `src/world`
+  imports the audio module. The world *emits named events* and the browser
+  decides what they are worth, which is why the Node suite and the headless
+  bots need no audio context and no stub for one.
+- **A parry rings and a block thuds.** If those two sound alike the player
+  cannot learn the timing by ear, and learning it by ear is most of what a
+  second playthrough is.
+- **Audio needs a gesture.** Every browser suspends a context created before
+  the user has touched the page, so the graph is built on the first key. Until
+  then the game is silent and says so once.
+
+The wind bed is driven from the world's own clock and wind field — the same
+quantity the grass is bending to — so the ambience cannot drift out of step
+with what is on screen. **M** mutes.
+
 ## Thieving
 
 Lockpicking, pickpocketing and sneaking were buyable and inert. What they buy

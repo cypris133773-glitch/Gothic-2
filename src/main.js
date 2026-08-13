@@ -15,6 +15,7 @@ import { createStorage } from './core/save.js';
 import { SKILLS, xpToNext, lpForAttribute } from './game/character.js';
 import { CHAPTERS } from './game/chapters.js';
 import { SPELLS } from './game/magic.js';
+import { createSound } from './audio/sound.js';
 import { ITEMS } from './data/items.js';
 
 const TICK_MS = 1000 / 60;          // the simulation is 60 Hz, always
@@ -124,6 +125,24 @@ async function boot() {
     return true;
   }
 
+  // --- sound ------------------------------------------------------------------
+  //
+  // Created now, started on the first gesture, because every browser suspends
+  // an AudioContext made before the user has touched the page. Until then the
+  // game is silent and says so once — the same rule the capability gate applies
+  // to everything else.
+  const sound = createSound({ off: off.has('sound') });
+  if (!sound.enabled && sound.reason) log(sound.reason);
+  const wake = () => {
+    if (sound.start()) {
+      log('sound on — M to mute');
+      removeEventListener('keydown', wake);
+      removeEventListener('pointerdown', wake);
+    }
+  };
+  addEventListener('keydown', wake);
+  addEventListener('pointerdown', wake);
+
   const input = createInput(canvas);
   const overlay = createOverlay(document.getElementById('overlay'));
   const timer = new FrameTimer();
@@ -161,6 +180,7 @@ async function boot() {
       region: world.region, regionTitle: world.regionTitle,
       pendingTravel: world.pendingTravel,
       dead: world.dead, deadFor: world.deadFor,
+      sound: { on: sound.enabled, muted: sound.muted },
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
@@ -487,6 +507,7 @@ async function boot() {
     if (e.code === 'KeyI') { openBook('pack'); return; }
     if (e.code === 'KeyJ') { openBook('log'); return; }
     if (e.code === 'KeyK') { openBook('runes'); return; }
+    if (e.code === 'KeyM') { log(sound.toggle() ? 'muted' : 'sound on'); return; }
     if (e.code === 'F5') { e.preventDefault(); save('manual'); }
     if (e.code === 'F9') { e.preventDefault(); load('manual'); }
   });
@@ -605,6 +626,15 @@ async function boot() {
 
     const cell = world.terrainCell();
     if (cell !== terrainCell) { terrainCell = cell; rebuildTerrain(); }
+
+    // The ambience is driven from the world's own clock and wind, so the bed
+    // under everything is the same quantity the grass is bending to rather than
+    // a separate loop that drifts out of step with it.
+    if (api.frames % 20 === 0) {
+      const hour = world.clock.minutes / 60;
+      const night = hour < 6 || hour > 20 ? 1 : 0;
+      sound.setAmbience({ night, gust: 0.5 + 0.5 * Math.sin(world.ticks / 260) });
+    }
 
     if (lineupCam) frameLineup();
     const [w, h] = sizeFor();

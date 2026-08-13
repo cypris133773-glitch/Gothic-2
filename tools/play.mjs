@@ -325,6 +325,21 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- sound, which needs a gesture ----------------------------------------
+    // Every browser suspends an AudioContext made before the user has touched
+    // the page, so the graph is built on the first key. By now the run has
+    // pressed several dozen, so it should be up.
+    const audio = await page.evaluate('window.GRIMWARD.probeState().sound');
+    ok('sound starts on the first gesture', audio.on, JSON.stringify(audio));
+    ok('and is not muted to begin with', !audio.muted);
+    await page.keyDown('KeyM'); await page.keyUp('KeyM');
+    await sleep(150);
+    const muted = await page.evaluate('window.GRIMWARD.probeState().sound');
+    ok('M mutes it', muted.muted);
+    await page.keyDown('KeyM'); await page.keyUp('KeyM');
+    await sleep(150);
+    ok('and unmutes it', !(await page.evaluate('window.GRIMWARD.probeState().sound')).muted);
+
     // --- a lock, held open with a real key ----------------------------------
     // Put the man beside the smithy's chest and give him what he needs. The
     // lock itself is opened by holding L, which is the point: it is a time cost

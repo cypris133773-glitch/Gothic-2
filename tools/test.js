@@ -13,6 +13,7 @@ import { Clock, MINUTES_PER_DAY, GAME_MINUTES_PER_SECOND, sunDirection, keyLight
 import { makeRng, hash } from '../src/core/rng.js';
 import * as m from '../src/core/math.js';
 import { on, emit, off, listenerCount, clearAll } from '../src/core/events.js';
+import { createSound } from '../src/audio/sound.js';
 import { createTerrain, PLACES, ROADS } from '../src/world/terrain.js';
 import { createWorld, travel, CHUNK, LOD_RES, RADIUS } from '../src/world/world.js';
 import { REGIONS } from '../src/world/regions.js';
@@ -1224,6 +1225,62 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(!early.won, `a level-${early.level} character cleared the lighthouse — it is not a wall`);
   const ready = run(30000, 50, 70, 'forged_blade', 'watch_mail');
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
+});
+
+// --- sound --------------------------------------------------------------------
+
+check('the world says what happened and never makes a sound itself', () => {
+  // The rule the whole audio design rests on: nothing in src/game or src/world
+  // imports the audio module, and the Node suite needs no AudioContext and no
+  // stub for one. What it *does* is emit named events, and this is the check
+  // that they actually arrive.
+  clearAll();
+  const heard = {};
+  const names = ['step', 'swing', 'hit', 'hurt', 'die', 'draw', 'shoot', 'cast',
+    'bolt', 'lock', 'unlock', 'coin', 'level', 'quest', 'door', 'chapter'];
+  for (const n of names) on(`sfx:${n}`, () => { heard[n] = (heard[n] || 0) + 1; });
+
+  const w = createWorld({ seed: 3, props: 10, beasts: 2, foes: false });
+
+  // Walking makes footsteps, and they land on the foot rather than on a timer.
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  for (let i = 0; i < 60 * 4; i++) w.tick(1 / 60, walk);
+  assert(heard.step > 4, `four seconds of running produced ${heard.step || 0} footsteps`);
+
+  // A swing announces itself on the tick it starts — the wind-up is the tell.
+  const swing = { ...idleIntent(), attack: true };
+  for (let i = 0; i < 60; i++) w.tick(1 / 60, swing);
+  assert(heard.swing > 0, 'a swing was silent');
+
+  // The rest of the world's noises, each from the act that causes it.
+  w.setQuest('q_ore', 'told');
+  assert(heard.quest > 0, 'the quest log was silent');
+  w.awardXp(700, 'quest');
+  assert(heard.level > 0, 'levelling up was silent');
+  w.flags.add('pass:upper');
+  w.tick(1 / 60);
+  assert(heard.door > 0, 'the gate opened in silence');
+
+  w.character.mana = 30; w.reloadout(); w.give('rune_fire_bolt');
+  w.cast('fire_bolt');
+  assert(heard.cast > 0, 'a cast was silent');
+  for (let i = 0; i < 60; i++) w.tick(1 / 60);
+  assert(heard.bolt > 0, 'the bolt left in silence');
+
+  clearAll();
+});
+
+check('audio refuses politely where there is no audio', () => {
+  // There is no AudioContext in Node, which is exactly the condition a browser
+  // with audio denied presents. Every entry point has to be a no-op rather than
+  // a throw: a game that cannot make sound still runs.
+  const s = createSound();
+  eq(s.enabled, false, 'Node grew a sound card');
+  assert(typeof s.reason === 'string' && s.reason.length > 0, 'and did not say why');
+  // None of these may throw.
+  s.start(); s.play('hit', {}); s.setAmbience({ night: 1 }); s.setVolume(0.5);
+  s.toggle(); s.dispose();
+  assert(true, 'the silent stub threw');
 });
 
 // --- thieving -----------------------------------------------------------------

@@ -22,6 +22,7 @@ import { poseHumanoid, advanceGait, KITS, kitForArmour } from '../game/rig.js';
 import { Clock, keyLightDirection, skyPalette } from '../core/time.js';
 import { idleIntent } from '../core/input.js';
 import { makeRng } from '../core/rng.js';
+import { emit } from '../core/events.js';
 import { createFighter, stepFighter, resolveStrike, isStriking, S } from '../game/combat.js';
 import { createBeast, stepBeast, poseBeast, BEASTS } from '../game/beast.js';
 import { createFoe, stepFoe, foeSpoils, FOES } from '../game/foe.js';
@@ -407,6 +408,16 @@ function stepPerson(p, terrain, dt) {
   advanceGait(p, dt);
 }
 
+/**
+ * Tell anything that is listening that something happened.
+ *
+ * The world never makes a sound and never draws a thing; it says what occurred
+ * and the browser decides what that is worth (§8.1.5). That is why the Node
+ * test suite and the headless bots need no audio context and no stub for one —
+ * nobody is subscribed, and `emit` on an empty list is a no-op.
+ */
+const sfx = (name, payload) => emit(`sfx:${name}`, payload);
+
 export function createWorld(opts = {}) {
   const seed = opts.seed || 1;
   const regionName = opts.region || DEFAULT_REGION;
@@ -758,7 +769,7 @@ export function createWorld(opts = {}) {
     awardXp(amount, reason = 'quest') {
       const gained = awardXp(character, amount, reason);
       player.xp = character.xp; player.level = character.level;
-      if (gained) world.log.push(`You are level ${character.level}. ${gained * 10} learning points.`);
+      if (gained) { world.log.push(`You are level ${character.level}. ${gained * 10} learning points.`); sfx('level'); }
       return gained;
     },
 
@@ -771,6 +782,7 @@ export function createWorld(opts = {}) {
       flags.add(`quest:${quest}:${stage}`);
       const q = QUESTS[quest];
       world.log.push(q ? `${q.title} — ${q.stages[stage] || stage}` : `Quest ${quest}: ${stage}`);
+      sfx('quest');
       return stage;
     },
 
@@ -805,7 +817,7 @@ export function createWorld(opts = {}) {
       world.chapter = n;
       world.applyChapter(n);
       const c = CHAPTERS[n];
-      if (!opts2.silent) world.log.push(`Chapter ${n}: ${c.title}. ${c.blurb}`);
+      if (!opts2.silent) { world.log.push(`Chapter ${n}: ${c.title}. ${c.blurb}`); sfx('chapter'); }
       return { ok: true, chapter: n };
     },
 
@@ -930,6 +942,7 @@ export function createWorld(opts = {}) {
       // A swing and a cast are the same commitment, so they cannot overlap.
       if (isStriking(player.fighter)) return { ok: false, why: 'both hands are busy' };
       beginCast(spellId, caster);
+      sfx('cast');
       return { ok: true, spell: spellId };
     },
 
@@ -1006,8 +1019,12 @@ export function createWorld(opts = {}) {
       if (!c) return { ok: false, why: 'there is nothing to open here' };
       if (c.open) return { ok: true, done: true };
       const r = pick(c, flags.has('skill:lockpick'), has(inventory, 'lockpick'));
+      // One tick of the pick every fifth frame, so the lock *tickers* rather
+      // than emitting a hundred and eighty clicks a second.
+      if (!r.why && !r.done && Math.round(c.picked) % 5 === 0) sfx('lock');
       if (r.why) return { ok: false, why: r.why };
       if (r.done) {
+        sfx('unlock');
         world.log.push('the lock gives');
         world.awardXp(c.lock === 'master' ? 200 : c.lock === 'good' ? 90 : 40, 'quest');
       }
@@ -1024,7 +1041,7 @@ export function createWorld(opts = {}) {
       c.emptied = true;
       const took = [];
       for (const [id, n] of c.loot) { world.give(id, n); took.push(`${n}× ${ITEMS[id].name}`); }
-      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); }
+      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); sfx('coin'); }
       world.log.push(took.length ? `took ${took.join(', ')}` : 'it is empty');
       return { ok: true, took };
     },
@@ -1046,6 +1063,7 @@ export function createWorld(opts = {}) {
       p.robbed = true;
       const purse = 12 + Math.floor(rng() * 60);
       character.gold += purse;
+      sfx('coin');
       world.awardXp(60, 'quest');
       world.log.push(`lifted ${purse} coin`);
       return { ok: true, gold: purse };
@@ -1083,8 +1101,12 @@ export function createWorld(opts = {}) {
       if (!c) return { ok: false, why: 'there is nothing to open here' };
       if (c.open) return { ok: true, done: true };
       const r = pick(c, flags.has('skill:lockpick'), has(inventory, 'lockpick'));
+      // One tick of the pick every fifth frame, so the lock *tickers* rather
+      // than emitting a hundred and eighty clicks a second.
+      if (!r.why && !r.done && Math.round(c.picked) % 5 === 0) sfx('lock');
       if (r.why) return { ok: false, why: r.why };
       if (r.done) {
+        sfx('unlock');
         world.log.push('the lock gives');
         world.awardXp(c.lock === 'master' ? 200 : c.lock === 'good' ? 90 : 40, 'quest');
       }
@@ -1101,7 +1123,7 @@ export function createWorld(opts = {}) {
       c.emptied = true;
       const took = [];
       for (const [id, n] of c.loot) { world.give(id, n); took.push(`${n}× ${ITEMS[id].name}`); }
-      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); }
+      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); sfx('coin'); }
       world.log.push(took.length ? `took ${took.join(', ')}` : 'it is empty');
       return { ok: true, took };
     },
@@ -1123,6 +1145,7 @@ export function createWorld(opts = {}) {
       p.robbed = true;
       const purse = 12 + Math.floor(rng() * 60);
       character.gold += purse;
+      sfx('coin');
       world.awardXp(60, 'quest');
       world.log.push(`lifted ${purse} coin`);
       return { ok: true, gold: purse };
@@ -1181,6 +1204,7 @@ export function createWorld(opts = {}) {
         if (j >= 0) staticBoxes.splice(j, 1);
       }
       world.log.push(`The ${name} gate is open.`);
+      sfx('door');
       return true;
     },
 
@@ -1499,8 +1523,18 @@ export function createWorld(opts = {}) {
       // blanked the intent after `stepPlayer` had already used it, and the
       // corpse walked six metres.
       if (player.fighter.state === S.DEAD) intent = idleIntent();
+      const wasPhase = player.phase || 0;
       stepPlayer(player, intent, terrain, obstacles, dt);
       advanceGait(player, dt);
+      // A footstep falls when the gait phase crosses a half turn, which is what
+      // makes the sound land on the foot rather than on a timer.
+      if (player.onGround && player.speed > 0.4
+        && Math.floor(wasPhase / Math.PI) !== Math.floor((player.phase || 0) / Math.PI)) {
+        sfx('step', {
+          speed: player.speed,
+          ground: terrain.padFactor(player.pos[0], player.pos[2]) > 0.5 ? 'stone' : 'grass',
+        });
+      }
 
       // The blade is a separate machine from the legs, and it is the one with
       // the frame counts. Movement is locked while a swing is out, which is the
@@ -1514,7 +1548,7 @@ export function createWorld(opts = {}) {
       // which is the sort of thing that reads as broken rather than as design.
       const holdingBow = !!world.bow();
       if (holdingBow) {
-        if (intent.attack && !archer.drawing) world.shoot();
+        if (intent.attack && !archer.drawing && world.shoot().ok) sfx('draw');
         // A drawn bow is a committed body, exactly like a swing.
         if (archer.drawing) { player.vel[0] *= 0.35; player.vel[2] *= 0.35; }
         stepFighter(f, { ...intent, attack: false }, rng);
@@ -1522,6 +1556,11 @@ export function createWorld(opts = {}) {
         stepFighter(f, intent, rng);
       }
 
+      // A swing announces itself on the tick it starts, not on the tick it
+      // lands: the wind-up is the tell, and the tell is half the fight.
+      if (f.state === S.WINDUP && f.t === f.weapon.windup) sfx('swing');
+
+      const hpWas = f.hp;
       for (const b of beasts) {
         stepBeast(b, player, terrain, dt, rng);
         if (isStriking(b)) resolveStrike(b, f, rng, meleeDamage);
@@ -1537,13 +1576,20 @@ export function createWorld(opts = {}) {
         }
       }
 
-    // --- shooting ------------------------------------------------------------
+      // The blade's own report: a parry rings, a block thuds, and a hit that
+      // got through neither is a grunt. If those three sound alike the player
+      // cannot learn the timing by ear, and learning it by ear is most of what
+      // a second playthrough is.
+      if (f.hp < hpWas) sfx(f.state === S.PARRY ? 'parry' : f.state === S.BLOCK ? 'block' : 'hurt');
+
+      // --- shooting ------------------------------------------------------------
       const loosed = stepArcher(archer);
       if (loosed) {
         const w = ITEMS[inventory.weapon];
         const ammoId = loosed === 'crossbow' ? 'bolt' : 'arrow';
         if (has(inventory, ammoId)) {
           remove(inventory, ammoId);
+          sfx('shoot');
           bolts.push(createArrow(loosed, [
             player.pos[0] + Math.sin(player.yaw) * 0.5,
             player.pos[1] + 1.3,
@@ -1564,6 +1610,7 @@ export function createWorld(opts = {}) {
           f.hp = Math.min(character.maxHp, f.hp + spell.heals);
           world.log.push(`healed ${f.hp - before}`);
         } else {
+          sfx('bolt');
           // Out of the hand, at chest height, along the way he is looking.
           bolts.push(createBolt(released, [
             player.pos[0] + Math.sin(player.yaw) * 0.6,
@@ -1612,6 +1659,7 @@ export function createWorld(opts = {}) {
       if (isStriking(f)) {
         for (const m of foes) {
           const hit = resolveStrike(f, m, rng, meleeDamage);
+          if (hit) sfx('hit', { armour: m.armor });
           if (hit && m.state === S.DEAD && !m.counted) {
             m.counted = true;
             const spoils = foeSpoils(m, rng);
@@ -1623,6 +1671,7 @@ export function createWorld(opts = {}) {
         }
         for (const b of beasts) {
           const hit = resolveStrike(f, b, rng, meleeDamage);
+          if (hit) sfx('hit', { armour: b.armor });
           if (hit && b.state === S.DEAD && !b.counted) {
             b.counted = true;
             world.awardXp(b.def.xp, 'quest');

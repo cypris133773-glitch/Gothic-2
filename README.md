@@ -193,6 +193,26 @@ so in its own output. The hardware budgets in §9.7 of the brief have not been
 measured yet, and until they are, nothing in this repository claims a frame
 rate.
 
+## Deploying it
+
+There is nothing to build. The game is `index.html`, `styles.css` and `src/` —
+vanilla ES modules, zero runtime dependencies, no bundler, no binary assets — so
+any static host serves it as-is, and the only thing a deployment has to get
+right is not trying to compile something.
+
+`vercel.json` says exactly that: the output directory is the repository root,
+there is no build step, and the two files a player's browser must never cache
+stale (`index.html` and everything under `src/`) are marked
+`max-age=0, must-revalidate`. `.vercelignore` keeps `tools/`, `docs/`, `shots/`
+and CI out of the upload, because they are how the game is made rather than part
+of it.
+
+To put it up the first time: import this repository at
+[vercel.com/new](https://vercel.com/new), leave the framework preset on **Other**
+and every build field empty, and deploy. After that every push to `main`
+redeploys it. From a machine that is logged in, `npx vercel --prod` does the same
+thing without GitHub.
+
 ## Licence and originality
 
 MIT. Every proper noun, asset and line of code here is original — see

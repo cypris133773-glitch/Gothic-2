@@ -1,0 +1,11 @@
+# What the deployment does not need. The game is index.html, styles.css and
+# src/ — everything else in this repository is how it gets *made*, and shipping
+# it to the edge only costs upload time and confuses anyone who goes looking.
+#
+# This file affects Vercel alone: the repository still carries all of it, and
+# the README still links the framings.
+tools/
+docs/
+shots/
+.github/
+perf-baseline.json

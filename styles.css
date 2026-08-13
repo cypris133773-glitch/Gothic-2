@@ -113,3 +113,22 @@ html, body {
 }
 #loading p { color: #6e6552; font-size: 13px; max-width: 40ch; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+/* The death screen. Red-black, and it fades in over a second and a half rather
+   than appearing, because the moment of dying belongs to the world and not to
+   the interface. */
+#died {
+  position: fixed; inset: 0; z-index: 9;
+  display: grid; place-content: center; gap: 14px; text-align: center;
+  background: radial-gradient(ellipse at center, rgba(30, 6, 6, 0.72), rgba(3, 2, 2, 0.94));
+  animation: died-in 1400ms ease-out both;
+}
+#died[hidden] { display: none; }
+#died h2 {
+  font-size: 20px; font-weight: 400; letter-spacing: 0.28em;
+  text-transform: uppercase; color: #a3392f;
+}
+#died p { color: #8a8171; font-size: 13px; }
+#died ul { list-style: none; color: #b9ad92; font-size: 14px; line-height: 2; }
+#died ul b { color: #c8a45c; margin-right: 10px; }
+@keyframes died-in { from { opacity: 0; } 40% { opacity: 0; } to { opacity: 1; } }

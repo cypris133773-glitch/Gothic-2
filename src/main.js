@@ -160,6 +160,7 @@ async function boot() {
       chapter: world.chapter,
       region: world.region, regionTitle: world.regionTitle,
       pendingTravel: world.pendingTravel,
+      dead: world.dead, deadFor: world.deadFor,
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
@@ -214,6 +215,19 @@ async function boot() {
   api.save = save; api.load = load;
 
   // --- conversations ---------------------------------------------------------
+  // --- death ------------------------------------------------------------------
+  const diedEl = document.getElementById('died');
+  const diedWhere = document.getElementById('died-where');
+  function renderDied() {
+    if (!world.dead) { diedEl.hidden = true; return; }
+    diedEl.hidden = false;
+    const [hx, hz] = world.safeHaven();
+    const near = Object.entries(world.places)
+      .map(([name, p]) => ({ name, d: Math.hypot(p.at[0] - hx, p.at[1] - hz) }))
+      .sort((a, b) => a.d - b.d)[0];
+    diedWhere.textContent = `You would wake near ${near ? near.name.replace(/_/g, ' ') : 'the road'}.`;
+  }
+
   const talkEl = document.getElementById('talk');
   const whoEl = document.getElementById('talk-who');
   const replyEl = document.getElementById('talk-reply');
@@ -417,6 +431,14 @@ async function boot() {
   addEventListener('keydown', (e) => {
     if (e.code === 'F3') { overlay.toggle(); return; }
 
+    // Death takes the keyboard. Nothing else is offered because nothing else
+    // is available: you load, or you wake up somewhere else and poorer.
+    if (world.dead) {
+      if (e.code === 'F9') { e.preventDefault(); load('manual').then(renderDied); return; }
+      if (e.code === 'Enter' || e.code === 'NumpadEnter') { world.revive(); renderDied(); return; }
+      return;
+    }
+
     // The book takes the number keys while it is up, and a conversation takes
     // them back — you cannot equip a sword mid-sentence, which is deliberate.
     if (tab && !world.dialogue.isOpen) {
@@ -565,6 +587,10 @@ async function boot() {
     // Autosave when the quest log moves — a region change and a chapter change
     // will join it once those exist (§5.3).
     if (world.quests.size !== lastQuestCount) { lastQuestCount = world.quests.size; save('auto'); }
+    // Redraw only when the screen and the world disagree. The first version
+    // compared `world.dead === !diedEl.hidden`, which is true exactly when they
+    // *already* agree — so the death screen never appeared.
+    if (diedEl.hidden !== !world.dead) renderDied();
 
     // Standing in an exit takes you through it. There is no prompt: the
     // barricade at the mouth of the pass is visible from a hundred metres and

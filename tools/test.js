@@ -1226,6 +1226,57 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- dying --------------------------------------------------------------------
+
+check('dying stops the man, and waking up costs something', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w.character.gold = 400;
+  w.player.pos[0] = -140; w.player.pos[2] = -30;
+  w.player.pos[1] = w.terrain.heightAt(-140, -30);
+  const day0 = w.clock.day, min0 = w.clock.minutes;
+
+  assert(!w.dead, 'a new character starts dead');
+  w.player.fighter.hp = 0;
+  w.player.fighter.state = S.DEAD;
+  w.tick(1 / 60);
+  assert(w.dead, 'the world did not notice');
+
+  // A dead man takes no orders — including from a bot, which is why the intent
+  // is blanked in the world rather than in the input layer.
+  const before = [w.player.pos[0], w.player.pos[2]];
+  const walk = { ...idleIntent(), forward: 1, run: true };
+  for (let i = 0; i < 120; i++) w.tick(1 / 60, walk);
+  const moved = Math.hypot(w.player.pos[0] - before[0], w.player.pos[2] - before[1]);
+  assert(moved < 0.3, `a corpse walked ${moved.toFixed(2)} m`);
+  assert(w.deadFor > 100, `the clock on the death screen did not run — ${w.deadFor}`);
+
+  const r = w.revive();
+  assert(r.ok, r.why);
+  eq(w.character.gold, 300, 'waking up was free');
+  assert(w.player.fighter.hp > 0 && w.player.fighter.hp <= w.character.maxHp / 2,
+    `woke at ${w.player.fighter.hp}/${w.character.maxHp}`);
+  assert(!w.dead, 'still dead after waking');
+  const elapsed = (w.clock.day - day0) * 24 * 60 + (w.clock.minutes - min0);
+  assert(elapsed > 60 * 11, `only ${(elapsed / 60).toFixed(1)} hours passed`);
+
+  // And you wake somewhere with people in it, not where you fell.
+  const away = Math.hypot(w.player.pos[0] - before[0], w.player.pos[2] - before[1]);
+  assert(away > 20, `woke ${away.toFixed(0)} m from where he died — that is where he died`);
+  assert(w.terrain.padFactor(w.player.pos[0], w.player.pos[2]) > 0.5,
+    'woke in the middle of a wood');
+});
+
+check('the valley wakes you at the camp, because it is the only safe ground', () => {
+  const w = createWorld({ seed: 2, region: 'cleftvale', props: 10, beasts: 0, foes: false });
+  w.player.pos[0] = w.places.keep.at[0]; w.player.pos[2] = w.places.keep.at[1];
+  w.player.fighter.hp = 0; w.player.fighter.state = S.DEAD;
+  w.tick(1 / 60);
+  w.revive();
+  const camp = w.places.camp.at;
+  const d = Math.hypot(w.player.pos[0] - camp[0], w.player.pos[2] - camp[1]);
+  assert(d < 2, `woke ${d.toFixed(0)} m from the camp`);
+});
+
 // --- magic --------------------------------------------------------------------
 
 check('a rune is an item, and mana is a wall rather than a modifier', () => {

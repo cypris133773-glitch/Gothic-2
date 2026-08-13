@@ -677,6 +677,11 @@ export function createWorld(opts = {}) {
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
     caster, bolts,
+    // Death. `dead` is set the tick the player's fighter enters DEAD, and
+    // `deadFor` counts up from there so the caller can hold the screen for a
+    // moment before offering anything — being killed and being handed a menu in
+    // the same frame reads as a bug rather than as a death.
+    dead: false, deadFor: 0,
     region: regionName, regionTitle: R.title,
     // Set when the player is standing in an exit and may use it. The world
     // cannot replace itself, so travelling is the caller's job: main.js reads
@@ -863,6 +868,55 @@ export function createWorld(opts = {}) {
       if (isStriking(player.fighter)) return { ok: false, why: 'both hands are busy' };
       beginCast(spellId, caster);
       return { ok: true, spell: spellId };
+    },
+
+    /**
+     * Where you wake up if you decline to reload.
+     *
+     * The nearest place with people in it, which on the island is the city and
+     * in the valley is the camp. It is deliberately *not* where you fell: the
+     * point of dying is that you lost the ground.
+     */
+    safeHaven() {
+      const P = terrain.places;
+      const homes = regionName === DEFAULT_REGION
+        ? [CITY.square, P.farm_aldwin.at, P.farm_sekk.at, P.farm_marrow.at, P.farm_hulder.at, P.farm_bren.at]
+        : [P.camp.at];
+      let best = homes[0], bestD = Infinity;
+      for (const h of homes) {
+        const d = Math.hypot(player.pos[0] - h[0], player.pos[2] - h[1]);
+        if (d < bestD) { bestD = d; best = h; }
+      }
+      return best;
+    },
+
+    /**
+     * Wake up.
+     *
+     * The alternative to reloading, and it costs: a quarter of the purse,
+     * half a day, and the walk back. Nothing is undone — the wolf that killed
+     * you is still standing where it killed you, still carrying the wounds you
+     * gave it, and it will kill you again if you go back in the same state.
+     * A death you can shrug off is a difficulty curve you can ignore.
+     */
+    revive() {
+      if (!world.dead) return { ok: false, why: 'you are not dead' };
+      const [hx, hz] = world.safeHaven();
+      player.pos[0] = hx; player.pos[2] = hz;
+      player.pos[1] = terrain.heightAt(hx, hz);
+      player.vel.set([0, 0, 0]);
+      player.onGround = true;
+      const lost = Math.floor(character.gold * 0.25);
+      character.gold -= lost;
+      const f2 = player.fighter;
+      f2.state = S.IDLE; f2.t = 0; f2.combo = 0;
+      f2.hp = Math.max(1, Math.floor(character.maxHp * 0.5));
+      caster.mana = caster.max;
+      clock.minutes += 60 * 12;
+      while (clock.minutes >= 24 * 60) { clock.minutes -= 24 * 60; clock.day++; }
+      world.dead = false; world.deadFor = 0;
+      world.log.push(`You wake half a day later, ${lost} coin lighter.`);
+      return { ok: true, at: [hx, hz], lost };
     },
 
     /** Take a door out of the world. Idempotent; the geometry only goes once. */
@@ -1188,6 +1242,13 @@ export function createWorld(opts = {}) {
       // walk past, and a wolf that wanders up is still a wolf (§6.5) — but the
       // player neither moves nor swings while he is talking.
       if (dialogue.isOpen) intent = idleIntent();
+      // A dead man takes no orders, and neither does one mid-conversation. Both
+      // are blanked *here*, before the legs move, rather than in the input
+      // layer: a bot, a replay and a keyboard all arrive at this function and
+      // only one of them goes through the input layer. The first version
+      // blanked the intent after `stepPlayer` had already used it, and the
+      // corpse walked six metres.
+      if (player.fighter.state === S.DEAD) intent = idleIntent();
       stepPlayer(player, intent, terrain, obstacles, dt);
       advanceGait(player, dt);
 
@@ -1289,6 +1350,13 @@ export function createWorld(opts = {}) {
             }
           }
         }
+      }
+
+      // Death. Noticed here rather than raised from the combat code, because
+      // the fighter does not know it belongs to the player and should not.
+      if (f.state === S.DEAD) {
+        if (!world.dead) { world.dead = true; world.deadFor = 0; world.log.push('You are dead.'); }
+        else world.deadFor++;
       }
 
       // Knockback moved bodies after the ground was resolved, so everything

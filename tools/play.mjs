@@ -180,14 +180,28 @@ async function main() {
       `${sneak.speed.toFixed(2)} m/s`);
 
     // --- jumping -----------------------------------------------------------
+    //
+    // Polled rather than sampled once. A jump is about six hundred milliseconds
+    // of flight and the probe used to look at a fixed 120 ms, which lands in
+    // the air on a healthy machine and on the ground on a loaded one — the
+    // check failed roughly one run in five reporting "vy 0.00", which reads
+    // exactly like a broken jump and never was one. Hold the key, watch for the
+    // feet leaving the floor, and give up only if they never do.
+    let airborne = null;
     await page.keyDown('Space');
-    await sleep(120);
-    const mid = await page.evaluate('window.GRIMWARD.probeState()');
+    try {
+      airborne = await page.waitFor(
+        '(() => { const s = window.GRIMWARD.probeState(); return (!s.onGround || s.vel[1] > 0.5) ? s : null; })()',
+        { what: 'the character to leave the ground', timeout: 3000, every: 30 },
+      );
+    } catch { airborne = await page.evaluate('window.GRIMWARD.probeState()'); }
     await page.keyUp('Space');
-    ok('space leaves the ground', !mid.onGround || mid.vel[1] > 0.5,
-      `vy ${mid.vel[1].toFixed(2)} m/s`);
-    await sleep(1200);
-    const landed = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('space leaves the ground', !airborne.onGround || airborne.vel[1] > 0.5,
+      `vy ${airborne.vel[1].toFixed(2)} m/s`);
+    const landed = await page.waitFor(
+      '(() => { const s = window.GRIMWARD.probeState(); return s.onGround ? s : null; })()',
+      { what: 'the character to land', timeout: 4000, every: 40 },
+    );
     ok('the character lands again', landed.onGround);
 
     // --- the camera --------------------------------------------------------
@@ -199,8 +213,18 @@ async function main() {
     // --- combat, through real key events ----------------------------------
     // The rule the whole system rests on, asserted through the browser's own
     // input path rather than by calling into the fighter.
+    //
+    // The wait is not padding. This check runs immediately after the jump test,
+    // and a character who is still in the air or still settling has an unstable
+    // combat state — so "F starts a swing" failed about one run in five, always
+    // reporting state 0, which reads exactly like a broken attack key and was
+    // not one. Wait for a body that is on the ground and idle first.
+    await page.waitFor(
+      '(() => { const s = window.GRIMWARD.probeState(); return s.onGround && s.combat.state === 0; })()',
+      { what: 'the character to settle before swinging', timeout: 4000 },
+    );
     await page.keyDown('KeyF');
-    await sleep(60);
+    await sleep(120);
     const swinging = await page.evaluate('window.GRIMWARD.probeState().combat');
     await page.keyUp('KeyF');
     ok('F starts a swing', swinging.state === 1 || swinging.state === 2 || swinging.state === 3,
@@ -300,6 +324,36 @@ async function main() {
 
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
+
+    // --- dying, and the screen that says so ---------------------------------
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      w.player.fighter.hp = 0;
+      w.player.fighter.state = 7;
+    })()`);
+    await sleep(300);
+    const died = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the world notices a death', died.dead, `dead ${died.dead}`);
+    ok('and the screen says so',
+      await page.evaluate('!document.getElementById("died").hidden'));
+
+    // W does nothing to a corpse.
+    const restingAt = died.pos;
+    await page.hold('KeyW', 600);
+    await sleep(200);
+    const still = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a corpse does not walk', dist2(restingAt, still.pos) < 0.5,
+      `${dist2(restingAt, still.pos).toFixed(2)} m`);
+
+    await page.keyDown('Enter'); await page.keyUp('Enter');
+    await sleep(300);
+    const woke = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('Enter wakes him up', !woke.dead);
+    ok('somewhere else', dist2(restingAt, woke.pos) > 5,
+      `${dist2(restingAt, woke.pos).toFixed(0)} m away`);
+    ok('and the screen went away',
+      await page.evaluate('document.getElementById("died").hidden'));
+    ok('no error from dying', !(await page.evaluate('window.GRIMWARD.error || null')));
 
     // --- magic, through real key events -------------------------------------
     // Give the man a rune and the mana to hold it, then throw it with R. The

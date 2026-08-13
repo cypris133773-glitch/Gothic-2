@@ -1226,6 +1226,147 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- thieving -----------------------------------------------------------------
+
+check('every chest can be stood next to', () => {
+  // The first draft put four chests inside a building's footprint, where the
+  // collision resolver shoved the player away from the thing he was trying to
+  // open, once per tick, for ever. A chest you cannot stand next to is not a
+  // chest, and nothing about that is visible from reading the coordinates.
+  for (const region of Object.keys(REGIONS)) {
+    const w = createWorld({ seed: 1, region, props: 60 });
+    for (const c of w.chests) {
+      let ok = false;
+      for (const [dx, dz] of [[1.3, 0], [-1.3, 0], [0, 1.3], [0, -1.3], [1, 1], [-1, -1]]) {
+        w.player.pos[0] = c.pos[0] + dx; w.player.pos[2] = c.pos[2] + dz;
+        w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+        const from = [w.player.pos[0], w.player.pos[2]];
+        for (let i = 0; i < 6; i++) w.tick(1 / 60);
+        if (Math.hypot(w.player.pos[0] - from[0], w.player.pos[2] - from[1]) < 0.25) { ok = true; break; }
+      }
+      assert(ok, `${region}/${c.id} is inside something — nobody can stand beside it`);
+    }
+  }
+});
+
+check('a lock is a time cost in the open, not a dice roll', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  const c = w.chests.find((x) => x.lock === 'simple');
+  w.player.pos[0] = c.pos[0] + 1.3; w.player.pos[2] = c.pos[2];
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+
+  // Two doors, in the order that matters: a man who cannot pick locks does not
+  // need to be told he is short a lockpick.
+  let r = w.pickLock();
+  assert(!r.ok && /do not know how/.test(r.why), `expected the skill, got "${r.why}"`);
+  w.flags.add('skill:lockpick');
+  r = w.pickLock();
+  assert(!r.ok && /lockpick/.test(r.why), `expected the tool, got "${r.why}"`);
+  w.give('lockpick');
+
+  // And then it is simply time. No roll, no failure — just standing still.
+  const hold = { ...idleIntent(), pick: true };
+  let ticks = 0;
+  while (!c.open && ticks < 600) { w.tick(1 / 60, hold); ticks++; }
+  assert(c.open, 'the simple lock never opened');
+  assert(ticks > 60 && ticks < 200, `a simple lock took ${(ticks / 60).toFixed(1)} s`);
+
+  // Once. A chest you emptied stays empty.
+  w.tick(1 / 60, hold);
+  assert(c.emptied, 'the chest was opened and not emptied');
+  const gold = w.character.gold;
+  w.tick(1 / 60, hold);
+  eq(w.character.gold, gold, 'the chest paid out twice');
+});
+
+check('walking away from a half-picked lock loses it', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  const c = w.chests.find((x) => x.lock === 'master');
+  w.flags.add('skill:lockpick'); w.give('lockpick');
+  w.player.pos[0] = c.pos[0] + 1.3; w.player.pos[2] = c.pos[2];
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  const hold = { ...idleIntent(), pick: true };
+  for (let i = 0; i < 120; i++) w.tick(1 / 60, hold);
+  assert(c.picked > 60, `no progress on the lock — ${c.picked}`);
+  assert(!c.open, 'a master lock opened in two seconds');
+
+  w.player.pos[0] += 8;
+  w.tick(1 / 60);
+  eq(c.picked, 0, 'the progress survived walking away, so being interrupted costs nothing');
+});
+
+check('a pocket is behind him, close, and unwatched', () => {
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  const mark = w.people.find((p) => p.id === 'npc11');   // alone at the monastery
+  const behind = (m) => {
+    w.player.pos[0] = m.pos[0] - Math.sin(m.yaw) * 1.0;
+    w.player.pos[2] = m.pos[2] - Math.cos(m.yaw) * 1.0;
+    w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+  };
+  behind(mark);
+
+  let r = w.pickPocket(mark);
+  assert(!r.ok && /do not know how/.test(r.why), `expected the skill, got "${r.why}"`);
+  w.flags.add('skill:pickpocket');
+
+  // In front of him is not behind him.
+  w.player.pos[0] = mark.pos[0] + Math.sin(mark.yaw) * 1.0;
+  w.player.pos[2] = mark.pos[2] + Math.cos(mark.yaw) * 1.0;
+  r = w.pickPocket(mark);
+  assert(!r.ok && /facing you/.test(r.why), `expected "facing you", got "${r.why}"`);
+
+  // Too far is too far.
+  w.player.pos[0] = mark.pos[0] - Math.sin(mark.yaw) * 4.0;
+  w.player.pos[2] = mark.pos[2] - Math.cos(mark.yaw) * 4.0;
+  r = w.pickPocket(mark);
+  assert(!r.ok && /too far/.test(r.why), `expected "too far", got "${r.why}"`);
+
+  behind(mark);
+  const gold = w.character.gold;
+  r = w.pickPocket(mark);
+  assert(r.ok, `the lift failed: ${r.why}`);
+  assert(w.character.gold > gold, 'the purse was empty');
+  assert(!w.pickPocket(mark).ok, 'the same purse was lifted twice');
+});
+
+check('a market square is watched and an empty lane is not', () => {
+  // The one condition that makes *where* you steal matter, and the reason the
+  // game bothers to have a market square.
+  const w = createWorld({ seed: 1, props: 10, beasts: 0, foes: false });
+  w.flags.add('skill:pickpocket');
+  const mark = w.people.find((p) => p.id === 'npc2');    // in the market
+  w.player.pos[0] = mark.pos[0] - Math.sin(mark.yaw) * 1.0;
+  w.player.pos[2] = mark.pos[2] - Math.cos(mark.yaw) * 1.0;
+  w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+
+  const seen = w.pickPocket(mark);
+  assert(!seen.ok && /watching/.test(seen.why), `expected a witness, got "${seen.why}"`);
+  assert(w.watchers().length > 0, 'nobody could see him in the middle of the market');
+
+  // Sneaking shortens how far people see, and that is the whole of what it
+  // buys. It does not narrow the cone: a man crouching in front of you is
+  // still a man in front of you.
+  const standing = w.watchers().length;
+  w.player.sneaking = true;
+  assert(w.watchers().length <= standing, 'sneaking made him more visible');
+});
+
+check('an emptied chest stays emptied across a save', () => {
+  const w = createWorld({ seed: 5, props: 10, beasts: 0, foes: false });
+  const c = w.chests[0];
+  c.open = true;
+  w.loot(c);
+  assert(c.emptied, 'the chest was not emptied');
+
+  const data = w.snapshot();
+  assert(data.chests.some((x) => x.id === c.id && x.emptied), 'the save forgot the chest');
+  const w2 = createWorld({ seed: 5, props: 10, beasts: 0, foes: false });
+  w2.restore(data);
+  const c2 = w2.chests.find((x) => x.id === c.id);
+  assert(c2.emptied, 'the chest refilled itself on load');
+  assert(!w2.loot(c2).ok, 'and paid out a second time');
+});
+
 // --- shooting -----------------------------------------------------------------
 
 /** Shoot at a pinned target from `dist` metres and report the hit rate. */

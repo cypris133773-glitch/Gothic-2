@@ -192,6 +192,32 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## Thieving
+
+Lockpicking, pickpocketing and sneaking were buyable and inert. What they buy
+now rests on one idea:
+
+**The risk is being seen, not failing.** A locked chest is not a roll you pass
+or fail; it is a *time cost* spent standing still in somebody's front room —
+two seconds for a simple lock, four for a good one, eight for a master's. Walk
+away half way and you have lost the progress. A pocket is not a percentage
+either: it is a range you must be inside, a direction he must not be facing,
+and nobody else watching. Sneaking shortens how far people can see you and does
+nothing else, which is enough.
+
+So nothing here rolls dice against the player. Everything is geometry and a
+clock, and the punishment for getting it wrong is a person turning round.
+
+Nine chests, placed by hand where somebody would actually put one, and every
+position is checked by a test that stands a player beside it and ticks — the
+first draft had four of them inside a building's footprint, where the collision
+resolver shoved the player away from the thing he was trying to open once per
+tick, for ever. A chest you cannot stand next to is not a chest.
+
+Hold **L** at a chest; **P** lifts a purse. Emptied chests and lifted purses
+are both saved, because a chest that refills on reload is a chest nobody
+bothers to remember.
+
 ## Bows
 
 A bow is a *different verb* from a sword, and the reason to carry one is that

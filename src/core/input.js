@@ -25,6 +25,10 @@ const DEFAULT_BINDINGS = {
   block: ['KeyG'],
   talk: ['KeyE'],
   train: ['KeyT'],
+  // Held, not tapped: a lock is a time cost in the open, so the key is held
+  // down the whole time somebody could walk past.
+  pick: ['KeyL'],
+  steal: ['KeyP'],
 };
 
 export function createInput(canvas, opts = {}) {
@@ -79,6 +83,7 @@ export function createInput(canvas, opts = {}) {
   const intent = {
     forward: 0, strafe: 0, turn: 0, look: 0,
     jump: false, sneak: false, run: true, attack: false, block: false,
+    pick: false, steal: false,
   };
 
   return {
@@ -98,6 +103,8 @@ export function createInput(canvas, opts = {}) {
       intent.run = !held('walk');
       intent.attack = held('attack') || mouseAttack;
       intent.block = held('block') || mouseBlock;
+      intent.pick = held('pick');
+      intent.steal = held('steal');
       mouseDX = 0; mouseDY = 0;
       return intent;
     },
@@ -111,5 +118,6 @@ export function idleIntent() {
   return {
     forward: 0, strafe: 0, turn: 0, look: 0,
     jump: false, sneak: false, run: true, attack: false, block: false,
+    pick: false, steal: false,
   };
 }

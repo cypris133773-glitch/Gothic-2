@@ -167,6 +167,11 @@ async function boot() {
       book: tab,
       mana: world.caster.mana, manaMax: world.caster.max,
       bow: world.bow(),
+      chest: (() => {
+        const c = world.nearestChest();
+        return c ? { id: c.id, lock: c.lock, open: c.open, emptied: c.emptied, picked: c.picked } : null;
+      })(),
+      watchers: world.watchers().length,
       casting: world.caster.casting, bolts: world.bolts.length,
       spells: world.spells().map((sp) => `${sp.id}${sp.ok ? '' : '!'}`),
       selectedSpell,
@@ -623,6 +628,14 @@ async function boot() {
         fight: `${STATE_NAME[pl.fighter.state]}${pl.fighter.t ? ` ${pl.fighter.t}` : ''}`
           + `  hp ${pl.fighter.hp}/${pl.fighter.maxHp}  combo ${pl.fighter.combo}`,
         hunt: `${world.beasts.filter((b) => b.state !== 7).length} alive  xp ${pl.xp}  level ${pl.level}`,
+        theft: (() => {
+          const c = world.nearestChest();
+          if (!c) return world.watchers().length ? `${world.watchers().length} can see you` : '';
+          if (c.emptied) return 'an empty chest';
+          if (c.open || !c.lock) return 'L to open';
+          const need = ({ simple: 110, good: 260, master: 460 })[c.lock];
+          return `${c.lock} lock — hold L  ${Math.round((c.picked / need) * 100)}%`;
+        })(),
         bow: world.bow()
           ? `${world.bow().name}  ${world.bow().have} ${world.bow().ammo}s`
             + `${world.bow().drawing ? `  drawing ${world.bow().drawing}` : ''}`

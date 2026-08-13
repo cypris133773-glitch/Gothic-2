@@ -33,6 +33,9 @@ import {
   createArcher, canShoot, beginDraw, stepArcher, breakDraw, createArrow,
   stepArrow, poseArrow, isRanged, BOWS, RANGED_CLASS,
 } from '../game/ranged.js';
+import {
+  createChest, pick, abandonPick, canSee, canPickPocket, LOCK_TICKS,
+} from '../game/theft.js';
 import { meleeDamage, levelForXp } from '../game/progression.js';
 import { createCharacter, awardXp, learn, raiseAttribute, joinGuild } from '../game/character.js';
 import { createDialogue } from '../game/dialogue.js';
@@ -625,6 +628,58 @@ export function createWorld(opts = {}) {
   }
   const doorBoxes = () => doors.filter((d) => !d.open).flatMap((d) => d.boxes);
 
+  /**
+   * Chests.
+   *
+   * Placed by hand, in the places a person would actually put one: behind the
+   * smithy, in a warehouse, in the barracks armoury, in the upper quarter, and
+   * out at the lighthouse and the keep where the people who own them are
+   * standing over them. The lock is the *time* it takes in the open, not a
+   * roll — see src/game/theft.js.
+   *
+   * Every one of these positions is checked by a test that puts a player beside
+   * it and ticks: the first draft had four chests inside a building's footprint,
+   * where the collision resolver shoved the player away from the thing he was
+   * trying to open, once per tick, for ever. A chest you cannot stand next to
+   * is not a chest.
+   */
+  const chests = [];
+  if (!opts.lineup && opts.town !== false) {
+    const put = (id, x, z, lock, loot, gold) => {
+      const c = createChest(id, x, z, terrain, lock, loot);
+      c.gold = gold || 0;
+      chests.push(c);
+    };
+    if (regionName === DEFAULT_REGION) {
+      put('chest_smithy', -12.4, 4.4, 'simple', [['lockpick', 2], ['rusty_blade', 1]], 45);
+      put('chest_warehouse', -22.8, -6.9, 'good', [['leather_jerkin', 1], ['healing_draught', 2]], 120);
+      put('chest_armoury', 13.4, -19.2, 'good', [['militia_sword', 1]], 90);
+      // The upper quarter's, which is most of the reason to want in.
+      put('chest_upper', 3.9, -24.0, 'master', [['elixir_str', 1], ['strong_draught', 2]], 380);
+      put('chest_light', -140.0, -40.0, 'good', [['war_bow', 1], ['arrow', 30]], 260);
+      put('chest_tower', 126.0, -100.0, 'master', [['rune_ice_lance', 1]], 200);
+    } else {
+      put('chest_camp', -12.0, 56.0, 'simple', [['strong_draught', 2], ['bolt', 20]], 70);
+      put('chest_keep', 97.7, -118.9, 'master', [['forged_blade', 1], ['elixir_life', 1]], 700);
+      put('chest_shrine', -118.0, -78.0, 'good', [['elixir_dex', 1]], 150);
+    }
+  }
+  // A chest is a box in the world as well as a container.
+  for (const c of chests) {
+    town.push({
+      pos: [c.pos[0], c.pos[1] + 0.36, c.pos[2]],
+      yaw: (c.pos[0] + c.pos[2]) * 0.31, pitch: 0,
+      scale: [0.95, 0.72, 0.66],
+      albedo: [0.20, 0.14, 0.08], tex: 10 /* MAT.PLANK */, radius: 0.55,
+    });
+    town.push({
+      pos: [c.pos[0], c.pos[1] + 0.74, c.pos[2]],
+      yaw: (c.pos[0] + c.pos[2]) * 0.31, pitch: 0,
+      scale: [1.0, 0.10, 0.70],
+      albedo: [0.14, 0.12, 0.11], tex: 8 /* MAT.STEEL */,
+    });
+  }
+
   // Everything the character controller can bump into.
   const obstacles = [...props, ...town, ...crates, ...doorBoxes()].filter((b) => b.radius || b.box);
 
@@ -684,7 +739,7 @@ export function createWorld(opts = {}) {
     seed, terrain, clock, player, camera, props, town, people, beasts, foes, obstacles, ticks: 0,
     character, flags, quests, inventory, chapter: 1, openTrainer: null, openTrader: null, log: [],
     crates, gates, places: terrain.places, city: CITY,
-    caster, archer, bolts,
+    caster, archer, bolts, chests,
     // Death. `dead` is set the tick the player's fighter enters DEAD, and
     // `deadFor` counts up from there so the caller can hold the screen for a
     // moment before offering anything — being killed and being handed a menu in
@@ -925,6 +980,160 @@ export function createWorld(opts = {}) {
       world.dead = false; world.deadFor = 0;
       world.log.push(`You wake half a day later, ${lost} coin lighter.`);
       return { ok: true, at: [hx, hz], lost };
+    },
+
+    // --- thieving -----------------------------------------------------------
+
+    /** The chest in front of the player, if there is one within reach. */
+    nearestChest(reach = 2.2) {
+      let best = null, bestD = reach;
+      for (const c of chests) {
+        const d = Math.hypot(c.pos[0] - player.pos[0], c.pos[2] - player.pos[2]);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      return best;
+    },
+
+    /**
+     * Work at the lock in front of you for one tick.
+     *
+     * Called from the tick while the key is held, which is what makes a lock a
+     * *time cost in the open* rather than a dice roll: six seconds standing
+     * still in somebody's front room, and walking away loses the progress.
+     */
+    pickLock() {
+      const c = world.nearestChest();
+      if (!c) return { ok: false, why: 'there is nothing to open here' };
+      if (c.open) return { ok: true, done: true };
+      const r = pick(c, flags.has('skill:lockpick'), has(inventory, 'lockpick'));
+      if (r.why) return { ok: false, why: r.why };
+      if (r.done) {
+        world.log.push('the lock gives');
+        world.awardXp(c.lock === 'master' ? 200 : c.lock === 'good' ? 90 : 40, 'quest');
+      }
+      return { ok: true, done: r.done, progress: r.progress };
+    },
+
+    /** Take what is in it. Once. */
+    loot(chest) {
+      const c = chest || world.nearestChest();
+      if (!c) return { ok: false, why: 'there is nothing to open here' };
+      if (!c.open && c.lock) return { ok: false, why: 'it is locked' };
+      c.open = true;
+      if (c.emptied) return { ok: false, why: 'you have already had this one' };
+      c.emptied = true;
+      const took = [];
+      for (const [id, n] of c.loot) { world.give(id, n); took.push(`${n}× ${ITEMS[id].name}`); }
+      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); }
+      world.log.push(took.length ? `took ${took.join(', ')}` : 'it is empty');
+      return { ok: true, took };
+    },
+
+    /**
+     * Lift a purse.
+     *
+     * Behind him, close, and nobody watching — three conditions of geometry
+     * rather than one roll of a die. Sneaking shrinks how far people can see
+     * you, which is the only thing sneaking has ever done here and is enough.
+     */
+    pickPocket(person) {
+      // *Not* `speaker()`: that one requires you to be facing them, and the
+      // whole point of a pocket is that you are behind it.
+      const p = person || nearestPerson(1.5);
+      if (!p) return { ok: false, why: 'there is nobody there' };
+      const check = canPickPocket(p, player, people, flags.has('skill:pickpocket'), player.sneaking);
+      if (!check.ok) { world.log.push(check.why); return check; }
+      p.robbed = true;
+      const purse = 12 + Math.floor(rng() * 60);
+      character.gold += purse;
+      world.awardXp(60, 'quest');
+      world.log.push(`lifted ${purse} coin`);
+      return { ok: true, gold: purse };
+    },
+
+    /** The nearest person, facing or not. */
+    nearPerson(reach = 1.5) { return nearestPerson(reach); },
+
+    /** Who can see the player right now — the whole of stealth, as a list. */
+    watchers() {
+      return people.filter((p) => canSee(p, player.pos[0], player.pos[2], player.sneaking));
+    },
+
+    // --- thieving -----------------------------------------------------------
+
+    /** The chest in front of the player, if there is one within reach. */
+    nearestChest(reach = 2.2) {
+      let best = null, bestD = reach;
+      for (const c of chests) {
+        const d = Math.hypot(c.pos[0] - player.pos[0], c.pos[2] - player.pos[2]);
+        if (d < bestD) { bestD = d; best = c; }
+      }
+      return best;
+    },
+
+    /**
+     * Work at the lock in front of you for one tick.
+     *
+     * Called from the tick while the key is held, which is what makes a lock a
+     * *time cost in the open* rather than a dice roll: six seconds standing
+     * still in somebody's front room, and walking away loses the progress.
+     */
+    pickLock() {
+      const c = world.nearestChest();
+      if (!c) return { ok: false, why: 'there is nothing to open here' };
+      if (c.open) return { ok: true, done: true };
+      const r = pick(c, flags.has('skill:lockpick'), has(inventory, 'lockpick'));
+      if (r.why) return { ok: false, why: r.why };
+      if (r.done) {
+        world.log.push('the lock gives');
+        world.awardXp(c.lock === 'master' ? 200 : c.lock === 'good' ? 90 : 40, 'quest');
+      }
+      return { ok: true, done: r.done, progress: r.progress };
+    },
+
+    /** Take what is in it. Once. */
+    loot(chest) {
+      const c = chest || world.nearestChest();
+      if (!c) return { ok: false, why: 'there is nothing to open here' };
+      if (!c.open && c.lock) return { ok: false, why: 'it is locked' };
+      c.open = true;
+      if (c.emptied) return { ok: false, why: 'you have already had this one' };
+      c.emptied = true;
+      const took = [];
+      for (const [id, n] of c.loot) { world.give(id, n); took.push(`${n}× ${ITEMS[id].name}`); }
+      if (c.gold) { character.gold += c.gold; took.push(`${c.gold} coin`); }
+      world.log.push(took.length ? `took ${took.join(', ')}` : 'it is empty');
+      return { ok: true, took };
+    },
+
+    /**
+     * Lift a purse.
+     *
+     * Behind him, close, and nobody watching — three conditions of geometry
+     * rather than one roll of a die. Sneaking shrinks how far people can see
+     * you, which is the only thing sneaking has ever done here and is enough.
+     */
+    pickPocket(person) {
+      // *Not* `speaker()`: that one requires you to be facing them, and the
+      // whole point of a pocket is that you are behind it.
+      const p = person || nearestPerson(1.5);
+      if (!p) return { ok: false, why: 'there is nobody there' };
+      const check = canPickPocket(p, player, people, flags.has('skill:pickpocket'), player.sneaking);
+      if (!check.ok) { world.log.push(check.why); return check; }
+      p.robbed = true;
+      const purse = 12 + Math.floor(rng() * 60);
+      character.gold += purse;
+      world.awardXp(60, 'quest');
+      world.log.push(`lifted ${purse} coin`);
+      return { ok: true, gold: purse };
+    },
+
+    /** The nearest person, facing or not. */
+    nearPerson(reach = 1.5) { return nearestPerson(reach); },
+
+    /** Who can see the player right now — the whole of stealth, as a list. */
+    watchers() {
+      return people.filter((p) => canSee(p, player.pos[0], player.pos[2], player.sneaking));
     },
 
     // --- shooting -----------------------------------------------------------
@@ -1250,8 +1459,8 @@ export function createWorld(opts = {}) {
     },
 
     /** The nearest person close enough and in front of you to talk to. */
-    speaker() {
-      let best = null, bestD = 3.2;
+    speaker(reach = 3.2) {
+      let best = null, bestD = reach;
       for (const p of people) {
         const dx = p.pos[0] - player.pos[0], dz = p.pos[2] - player.pos[2];
         const d = Math.hypot(dx, dz);
@@ -1328,7 +1537,7 @@ export function createWorld(opts = {}) {
         }
       }
 
-      // --- shooting ------------------------------------------------------------
+    // --- shooting ------------------------------------------------------------
       const loosed = stepArcher(archer);
       if (loosed) {
         const w = ITEMS[inventory.weapon];
@@ -1426,6 +1635,24 @@ export function createWorld(opts = {}) {
             }
           }
         }
+      }
+
+      // Thieving. Both verbs are driven from the tick rather than from a key
+      // handler, because a lock is *held* and a bot has to be able to do it.
+      if (intent.pick) {
+        const c = world.nearestChest();
+        if (c && !c.open) world.pickLock();
+        else if (c && !c.emptied) world.loot(c);
+      }
+      if (intent.steal && !world.stealHeld) world.pickPocket();
+      world.stealHeld = !!intent.steal;
+
+      // A lock you walked away from is a lock you have to start again. Kept
+      // here rather than in the key handler so that it is true of a bot and of
+      // a player who simply got bored and wandered off.
+      for (const c of chests) {
+        if (c.open || c.picked <= 0) continue;
+        if (Math.hypot(c.pos[0] - player.pos[0], c.pos[2] - player.pos[2]) > 2.6) abandonPick(c);
       }
 
       // Death. Noticed here rather than raised from the combat code, because
@@ -1550,6 +1777,16 @@ export function createWorld(opts = {}) {
       return scene;
     },
   };
+
+  /** Nearest person within reach, regardless of which way anyone is looking. */
+  function nearestPerson(reach) {
+    let best = null, bestD = reach;
+    for (const p of people) {
+      const d = Math.hypot(p.pos[0] - player.pos[0], p.pos[2] - player.pos[2]);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    return best;
+  }
 
   // The conversation runner needs the world it edits, so it is built last.
   const dialogue = createDialogue(world);

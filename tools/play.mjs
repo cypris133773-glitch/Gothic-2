@@ -325,6 +325,31 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- a lock, held open with a real key ----------------------------------
+    // Put the man beside the smithy's chest and give him what he needs. The
+    // lock itself is opened by holding L, which is the point: it is a time cost
+    // in the open rather than a dice roll.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      const c = w.chests.find((x) => x.id === 'chest_smithy');
+      w.flags.add('skill:lockpick'); w.give('lockpick');
+      w.player.pos[0] = c.pos[0] + 1.3; w.player.pos[2] = c.pos[2];
+      w.player.pos[1] = w.terrain.heightAt(w.player.pos[0], w.player.pos[2]);
+    })()`);
+    await sleep(200);
+    const atChest = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('there is a chest here', atChest.chest && atChest.chest.id === 'chest_smithy',
+      atChest.chest ? atChest.chest.id : 'none');
+    ok('and it is locked', atChest.chest.lock === 'simple' && !atChest.chest.open);
+
+    const goldBefore = atChest.gold;
+    await page.hold('KeyL', 2600);
+    await sleep(300);
+    const opened = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('holding L opens it', opened.chest.open, `picked ${Math.round(opened.chest.picked)}`);
+    ok('and takes what is in it', opened.gold > goldBefore, `${goldBefore} → ${opened.gold} coin`);
+    ok('no error from picking a lock', !(await page.evaluate('window.GRIMWARD.error || null')));
+
     // --- a bow, through the same attack key ---------------------------------
     // The attack button uses the weapon in hand. A separate shoot key would
     // mean a player holding a bow has an attack button that does nothing.

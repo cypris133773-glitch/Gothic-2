@@ -109,6 +109,41 @@ character walks, stops, turns without pointer lock, strafes without turning,
 sneaks slower than it runs, jumps and lands, and the camera stays behind it and
 out of the hillside.
 
+## On a phone
+
+The game is playable with two thumbs, and it got there by one decision rather
+than by a port: **every touch control except the movement stick presses a key.**
+A button dispatches a real `keydown`/`keyup` with the same `code` the desk
+binding uses, so movement, the book, the shop, a conversation and the save slots
+are all already listening for it. There is no second dispatch table to keep in
+step and no `if (touch)` inside the gameplay code.
+
+The stick is the one exception, because a thumb is analogue and a key is not:
+pushing it half way walks and pushing it all the way runs, which is a distinction
+the keyboard needs a modifier for. `src/core/touch.js` is the whole of it.
+
+- Left half of the screen is a stick that is drawn where the thumb lands, not
+  where a designer put it. Right half drags to look and turn.
+- **Hit · Guard · Jump · Talk** sit under the right thumb; everything used less
+  than once a minute (runes, locks, purses, sneak, the book's five tabs, save,
+  load, mute) is behind the **☰**.
+- Every list the number keys act on also answers to a tap — dialogue lines, shop
+  rows, pack rows, attributes, runes, the tabs, the title menu's save slots — and
+  each panel has a close cross, because Esc is not a key a phone has.
+- A panel that is open stands the thumb controls down, so reaching for a line of
+  dialogue does not walk you into a wall.
+- The controls do not appear because the browser reports a touchscreen. They
+  appear the first time somebody touches the glass, because a laptop with a
+  touchscreen is a laptop. `?touch=1` forces them on a desk machine.
+- A phone keeps its textures and gives up the shadow pass and the device pixel
+  ratio instead (capped at 1.4): a current handset's GPU draws this world
+  happily, and what it cannot afford is nine fragments per point.
+
+`npm run play` drives all of it with real `Input.dispatchTouchEvent` calls —
+sixteen of the browser checks are the touch layer, including that half a stick
+is measurably a walk (1.05 m/s) and a whole one a run (5.40 m/s).
+`npm run shot:phone` photographs the game at 390×844 with a device ratio of two.
+
 ## The duel harness
 
 `npm test` runs 200 headless duels between two policies — one that holds the

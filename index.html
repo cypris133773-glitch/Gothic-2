@@ -26,6 +26,12 @@
   <h1>GRIMWARD</h1>
   <p id="title-sub">An open-world action RPG in the 2003 German tradition</p>
   <ul id="title-menu"></ul>
+  <div id="title-touch">
+    <div><b>Left thumb</b> walk — push it half way to walk, all the way to run</div>
+    <div><b>Right thumb</b> look and turn · <b>Hit</b> <b>Guard</b> <b>Jump</b> <b>Talk</b> at your thumb</div>
+    <div><b>☰</b> runes, locks, purses, the map and your pack</div>
+    <div>Tap any line in a conversation, a shop or the book to choose it</div>
+  </div>
   <div id="title-keys">
     <div><b>W A S D</b> move · <b>Shift</b> walk · <b>Ctrl</b> sneak · <b>Space</b> jump</div>
     <div><b>F</b> attack or shoot · <b>G</b> block · <b>R</b> cast · <b>E</b> talk · <b>T</b> train</div>
@@ -49,8 +55,8 @@
   <h2>You are dead</h2>
   <p id="died-where"></p>
   <ul id="died-options">
-    <li><b>F9</b> load your last save</li>
-    <li><b>Enter</b> wake up — half a day and a quarter of your purse</li>
+    <li data-act="load"><b>F9</b> load your last save</li>
+    <li data-act="wake"><b>Enter</b> wake up — half a day and a quarter of your purse</li>
   </ul>
 </div>
 
@@ -59,13 +65,14 @@
 <div id="ended" hidden>
   <h2>It is finished</h2>
   <p id="ended-body"></p>
-  <p class="ended-hint">Any key to go on walking</p>
+  <p class="ended-hint">Any key — or a tap — to go on walking</p>
 </div>
 
 <!-- Conversations are text, and text is what the DOM is for. The canvas draws
      the world; a talking-head panel over it is one element and reflows itself
      on a phone, which a canvas-drawn one would not. -->
 <div id="talk" hidden>
+  <button class="x" data-close="talk" aria-label="End the conversation">×</button>
   <p id="talk-who"></p>
   <p id="talk-reply"></p>
   <ol id="talk-options"></ol>
@@ -77,6 +84,7 @@
      and making the player press a second key to hear the end of it is the sort
      of thing nobody notices until they have done it two hundred times. -->
 <div id="shop" hidden>
+  <button class="x" data-close="shop" aria-label="Done trading">×</button>
   <p id="shop-who"></p>
   <div id="shop-cols">
     <div><h4>He is selling</h4><ul id="shop-stock"></ul></div>
@@ -90,6 +98,7 @@
      because they are read together — "can I afford that sword yet" is a
      question about the inventory and the sheet at the same time. -->
 <div id="book" hidden>
+  <button class="x" data-close="book" aria-label="Close">×</button>
   <nav id="book-tabs">
     <button data-tab="sheet">Character <b>C</b></button>
     <button data-tab="pack">Pack <b>I</b></button>

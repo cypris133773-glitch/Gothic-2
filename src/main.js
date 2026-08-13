@@ -47,8 +47,15 @@ async function boot() {
   // it doubles the geometry submitted per frame, which is nothing on a GPU and
   // the difference between 30 fps and 14 on a software rasteriser. `?off=shadows`
   // switches it off anywhere, which is also how you bisect a lighting bug.
+  // A hand-held screen is held at arm's length and its GPU is fed by a battery.
+  // Both of those are decided here rather than by the tier, because a phone is
+  // not a weak desktop: it wants the textures and it cannot afford the pixels.
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   const device = await createDevice(canvas, caps, {
-    shadows: !off.has('shadows') && tier !== 'low',
+    // The shadow pass doubles the geometry submitted per frame. That is nothing
+    // on a desk and it is the whole battery on a phone, so a coarse pointer
+    // gives it up unless `?tier=` says otherwise on purpose.
+    shadows: !off.has('shadows') && tier !== 'low' && (!coarse || params.has('tier')),
     shadowSize: tier === 'high' ? 2048 : 1024,
     textures: !off.has('textures') && tier !== 'low',
   });
@@ -182,6 +189,9 @@ async function boot() {
       dead: world.dead, deadFor: world.deadFor,
       finished: world.finished,
       sound: { on: sound.enabled, muted: sound.muted },
+      touch: input.touch
+        ? { on: input.touch.active, mag: +input.touch.mag.toFixed(3), stick: [+input.touch.x.toFixed(3), +input.touch.z.toFixed(3)] }
+        : null,
       title: atTitle,
       quests: world.questLog().map((q) => `${q.id}:${q.stage}`),
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
@@ -277,11 +287,19 @@ async function boot() {
     menuEl.replaceChildren(...rows.map(([key, label, on2]) => {
       const li = document.createElement('li');
       if (!on2) li.className = 'off';
+      else li.dataset.act = key;      // and a finger can press it too
       const b = document.createElement('b');
       b.textContent = key;
       li.append(b, document.createTextNode(label));
       return li;
     }));
+  }
+
+  /** What the three title rows do, whether they were pressed or tapped. */
+  function titleChoice(n) {
+    if (n === '1') { leaveTitle(); return; }
+    if (n === '2') { load('auto').then(leaveTitle); return; }
+    if (n === '3') { load('manual').then(leaveTitle); }
   }
 
   function leaveTitle() {
@@ -322,9 +340,12 @@ async function boot() {
     buying = s.stock.slice(0, 9);
     selling = s.mine.slice(0, 9);
 
-    const row = (i, name, note, off) => {
+    const row = (i, name, note, off, side, idx) => {
       const li = document.createElement('li');
       if (off) li.className = 'off';
+      // Tapping a row is the same act as pressing its number, and it is the
+      // only way to buy anything on a phone.
+      if (side) li.dataset[side] = String(idx);
       const k = document.createElement('span'); k.className = 'k'; k.textContent = i;
       const n = document.createElement('span'); n.className = 'n'; n.textContent = name;
       const m2 = document.createElement('span'); m2.className = 'm'; m2.textContent = note;
@@ -339,10 +360,10 @@ async function boot() {
     };
 
     shopStock.replaceChildren(...(buying.length
-      ? buying.map((it, i) => row(`${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.afford))
+      ? buying.map((it, i) => row(`${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.afford, 'buy', i))
       : [empty('His rack is bare.')]));
     shopMine.replaceChildren(...(selling.length
-      ? selling.map((it, i) => row(`⇧${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.wanted))
+      ? selling.map((it, i) => row(`⇧${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.wanted, 'sell', i))
       : [empty('Nothing here he deals in.')]));
   }
 
@@ -377,6 +398,7 @@ async function boot() {
     replyEl.textContent = active.reply || '';
     optionsEl.replaceChildren(...active.options.map((o, i) => {
       const li = document.createElement('li');
+      li.dataset.say = String(i);
       const b = document.createElement('b');
       b.textContent = `${i + 1}.`;
       li.append(b, document.createTextNode(o.text));
@@ -407,12 +429,31 @@ async function boot() {
   /** A numbered row: key, name, and a right-hand note. */
   const row = (i, name, note, cls = '') => {
     const li = el('li', cls);
+    // A numbered row is an action, and an action must be reachable by a finger
+    // as well as by its number. The index is the row's number minus one, which
+    // is exactly what `actions` is keyed by — the two lists are built together
+    // in every tab, so they cannot get out of step.
+    if (i != null) li.dataset.act = String(Number(i) - 1);
     li.append(el('span', 'k', i != null ? String(i) : ''), el('span', 'n', name), el('span', 'm', note || ''));
     return li;
   };
 
   /** What the number keys act on right now, so the handler stays dumb. */
   let actions = [];
+
+  /**
+   * The line at the foot of the book.
+   *
+   * It says how to work the screen, so it has to say something different when
+   * there is no keyboard: "Esc closes" is a lie on a phone and "C/I/J switch"
+   * is nonsense. One helper rather than five duplicated ternaries, and the
+   * touch wording is written beside the key wording so the two cannot describe
+   * different screens.
+   */
+  const setHint = (what, keys, tap) => {
+    const onTouch = document.body.classList.contains('touch');
+    hintEl.textContent = [what, onTouch ? tap : keys].filter(Boolean).join('  ·  ');
+  };
 
   function renderSheet() {
     const c = world.character;
@@ -461,7 +502,7 @@ async function boot() {
     hl.append(el('dt', null, 'Health'), el('dd', null, `${f.hp} / ${c.maxHp}`));
     out.push(hl);
 
-    hintEl.textContent = '1–3 raise an attribute · C/I/J switch · Esc closes';
+    setHint('Raise an attribute', '1–3 to raise · C/I/J switch · Esc closes', 'Tap one to raise it');
     bodyEl.replaceChildren(...out);
   }
 
@@ -492,7 +533,7 @@ async function boot() {
       }
       out.push(ul);
     }
-    hintEl.textContent = '1–9 equip, unequip or drink · C/I/J switch · Esc closes';
+    setHint('Equip, unequip or drink', '1–9 · C/I/J switch · Esc closes', 'Tap a line');
     bodyEl.replaceChildren(...out);
   }
 
@@ -520,7 +561,7 @@ async function boot() {
     dl.append(el('dt', null, 'Casting'), el('dd', null,
       world.caster.casting ? SPELLS[world.caster.casting].short : '—'));
     out.push(el('h3', null, 'The pool'), dl);
-    hintEl.textContent = '1–9 choose · R throws it · C/I/J/K switch · Esc closes';
+    setHint('Choose the rune you throw', '1–9 · R throws it · C/I/J/K switch · Esc closes', 'Tap a rune, then Cast a rune under ☰');
     bodyEl.replaceChildren(...out);
   }
 
@@ -592,7 +633,7 @@ async function boot() {
     dl.append(el('dt', null, 'You are at'), el('dd', null, `${px.toFixed(0)}, ${pz.toFixed(0)}`));
     dl.append(el('dt', null, 'Day'), el('dd', null, `${world.clock.day}, ${world.clock.hhmm}`));
     out.push(dl);
-    hintEl.textContent = 'Places appear once you have been near them · C/I/J/K/N switch · Esc closes';
+    setHint('Places appear once you have been near them', 'C/I/J/K/N switch · Esc closes', null);
     bodyEl.replaceChildren(...out);
   }
 
@@ -619,7 +660,7 @@ async function boot() {
       for (const r of shut) ul.append(row(null, r.title, r.stage, 'done'));
       out.push(ul);
     }
-    hintEl.textContent = 'C/I/J switch · Esc closes';
+    setHint(null, 'C/I/J switch · Esc closes', null);
     bodyEl.replaceChildren(...out);
   }
 
@@ -639,9 +680,8 @@ async function boot() {
 
     // The title takes the keyboard before anything else does.
     if (atTitle) {
-      if (e.code === 'Digit1') { leaveTitle(); return; }
-      if (e.code === 'Digit2') { load('auto').then(leaveTitle); return; }
-      if (e.code === 'Digit3') { load('manual').then(leaveTitle); return; }
+      const m = /^Digit([1-3])$/.exec(e.code);
+      if (m) titleChoice(m[1]);
       return;
     }
 
@@ -731,8 +771,79 @@ async function boot() {
     if (b) { tab = b.dataset.tab; renderBook(); }
   });
 
+  // --- the same game, with a finger --------------------------------------------
+  //
+  // Everything above answers to a key, and a phone has none. So every list the
+  // number keys act on also answers to a tap — routed into the same functions
+  // rather than into a copy of them, which is the only way the two input paths
+  // cannot drift apart. (The movement and combat controls need no code here at
+  // all: src/core/touch.js presses the keys.)
+  const clicked = (e, sel) => e.target.closest(sel);
+
+  menuEl.addEventListener('click', (e) => {
+    const li = clicked(e, 'li[data-act]');
+    if (li && atTitle) titleChoice(li.dataset.act);
+  });
+
+  document.getElementById('died-options').addEventListener('click', (e) => {
+    const li = clicked(e, 'li[data-act]');
+    if (!li || !world.dead) return;
+    if (li.dataset.act === 'load') load('manual').then(renderDied);
+    else { world.revive(); renderDied(); }
+  });
+
+  endedEl.addEventListener('click', () => {
+    if (!endShown) { endShown = true; endedEl.hidden = true; }
+  });
+
+  optionsEl.addEventListener('click', (e) => {
+    const li = clicked(e, 'li[data-say]');
+    if (!li || !world.dialogue.isOpen) return;
+    world.dialogue.say(Number(li.dataset.say));
+    renderTalk(); renderShop();
+  });
+
+  shopEl.addEventListener('click', (e) => {
+    const li = clicked(e, 'li[data-buy], li[data-sell]');
+    if (!li) return;
+    const isBuy = li.dataset.buy != null;
+    const it = isBuy ? buying[Number(li.dataset.buy)] : selling[Number(li.dataset.sell)];
+    if (!it) return;
+    const r = isBuy ? world.buy(it.id) : world.sell(it.id);
+    if (!r.ok) log(r.why);
+    renderShop();
+  });
+
+  bodyEl.addEventListener('click', (e) => {
+    const li = clicked(e, 'li[data-act]');
+    const a = li && actions[Number(li.dataset.act)];
+    if (!a) return;
+    const r = a.do();
+    if (r && r.why && !r.ok) log(r.why);
+    renderBook();
+  });
+
+  // The close crosses, because Esc is not a key a phone has.
+  for (const b of document.querySelectorAll('.x')) {
+    b.addEventListener('click', () => {
+      if (b.dataset.close === 'talk') { world.dialogue.close(); renderTalk(); renderShop(); }
+      if (b.dataset.close === 'shop') { world.openTrader = null; renderShop(); renderTalk(); }
+      if (b.dataset.close === 'book') { tab = null; renderBook(); }
+    });
+  }
+
+  // `?touch=1` shows the overlay on a desk machine, which is how it gets
+  // photographed and how it gets tested without a phone in the room.
+  if (params.get('touch') === '1' && input.touch) input.touch.activate();
+
   const sizeFor = () => {
-    const scale = renderScale || (tier === 'low' ? 0.8 : Math.min(devicePixelRatio || 1, 2));
+    // The cap, not the tier, is where a phone pays. A modern handset reports a
+    // device ratio of 3; drawing at it would shade nine fragments for every
+    // point on a screen nobody holds closer than forty centimetres.
+    const cap = coarse ? 1.4 : 2;
+    const floor = coarse ? 1 : 0.8;
+    const scale = renderScale
+      || (tier === 'low' ? floor : Math.min(devicePixelRatio || 1, cap));
     return [Math.round(innerWidth * scale), Math.round(innerHeight * scale)];
   };
 
@@ -840,6 +951,16 @@ async function boot() {
     // a screen, rather than only the one path that remembered to ask for one.
     if (shopEl.hidden !== !world.openTrader) renderShop();
     if (world.finished && !endShown && endedEl.hidden) renderEnded();
+
+    // A panel owns the screen: the stick and the buttons stand down under it,
+    // so a thumb reaching for a conversation line does not walk into a wall on
+    // the way. Reconciled every frame rather than at every call site, for the
+    // same reason the death screen is — one place that can be wrong beats nine
+    // that can each be forgotten.
+    if (input.touch) {
+      input.touch.setPanel(!!(atTitle || tab || world.openTrader || world.dialogue.isOpen
+        || world.dead || (world.finished && !endShown)));
+    }
 
     // Standing in an exit takes you through it. There is no prompt: the
     // barricade at the mouth of the pass is visible from a hundred metres and

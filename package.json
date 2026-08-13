@@ -9,6 +9,7 @@
     "dev": "node tools/serve.js",
     "test": "node tools/test.js",
     "shot": "node tools/shot.mjs",
+    "shot:phone": "node tools/shot.mjs --phone --out=shots/phone",
     "play": "node tools/play.mjs",
     "perf": "node tools/perf.mjs",
     "perf:baseline": "node tools/perf.mjs --baseline",

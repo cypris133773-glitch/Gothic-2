@@ -26,7 +26,7 @@ import http from 'node:http';
 import zlib from 'node:zlib';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
-import { connect, findPageTarget } from './cdp.mjs';
+import { connect, findPageTarget, sleep } from './cdp.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const argv = process.argv.slice(2);
@@ -96,7 +96,26 @@ function serve() {
 
 const LINEUP = !!opt('lineup');
 const VISTA = !!opt('vista');
-const SCENES = LINEUP
+// The phone. A separate mode rather than a separate tool, because the question
+// it answers is the same one every other framing answers — was a lit frame
+// produced, and does the screen read — asked at 390 points wide with two thumbs
+// in the way.
+const PHONE = !!opt('phone');
+const SCENES = PHONE
+  ? [
+      // Stood at the land gate, controls up: the framing that shows whether a
+      // world built for a desk survives being held in a hand.
+      { name: 'phone-gate', time: 10.5, extra: '&menu=0&touch=1&start=0,56&yaw=3.1416' },
+      // The title, which on a phone lists the thumbs rather than the keys.
+      { name: 'phone-title', time: 10.5, extra: '&menu=1&touch=1', dimmed: true },
+      // A panel, because a panel is where a phone port usually falls over: the
+      // book has to fit, scroll and be tappable at this width.
+      { name: 'phone-pack', time: 10.5, extra: '&menu=0&touch=1', open: 'pack', dimmed: true },
+      { name: 'phone-map', time: 10.5, extra: '&menu=0&touch=1', open: 'map', dimmed: true },
+      // The drawer open over the world: every control the game has, at once.
+      { name: 'phone-controls', time: 10.5, extra: '&menu=0&touch=1', drawer: true },
+    ]
+  : LINEUP
   ? [
       { name: 'models', time: 11 },
       // Three suits, close: the pieces are what this sheet is for, and at nine
@@ -166,6 +185,25 @@ async function run() {
     const page = await connect(target.webSocketDebuggerUrl);
     await page.send('Page.enable');
     await page.send('Runtime.enable');
+    if (PHONE) {
+      // The window itself has to be the size of the phone, not only the layout
+      // viewport. A device-metrics override alone leaves the compositor with
+      // the old, shorter surface and the screenshot comes back as five stacked
+      // copies of the top of the page — a picture that looks like a broken
+      // renderer and is a browser window nobody resized.
+      const { windowId } = await page.send('Browser.getWindowForTarget');
+      await page.send('Browser.setWindowBounds',
+        { windowId, bounds: { width: 390, height: 844 } });
+      // A phone is not a small window: it is a small window with a high device
+      // ratio, a coarse pointer and touch events. All three change what the
+      // page does, so all three are emulated or the photograph is of something
+      // no player will ever see.
+      await page.send('Emulation.setDeviceMetricsOverride',
+        { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+      await page.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+      await page.send('Emulation.setEmitTouchEventsForMouse', { enabled: true, configuration: 'mobile' })
+        .catch(() => {});
+    }
 
     for (const scene of SCENES) {
       process.stdout.write(`  ${scene.name} …\r`);
@@ -177,10 +215,32 @@ async function run() {
         { timeout: 60000, what: `${scene.name} to render` });
       if (probe.error || !probe.drawCalls) throw new Error(`${scene.name}: the page reported ${JSON.stringify(probe)}`);
 
-      const shot = await page.send('Page.captureScreenshot', { format: 'png' });
+      // The phone framings are staged after the probe has proved a frame was
+      // drawn: the panel is opened through the game's own entry point, which is
+      // the same latitude `?cast=` takes to photograph a bolt in flight.
+      if (scene.open) {
+        await page.evaluate(`window.GRIMWARD.book.open(${JSON.stringify(scene.open)})`);
+        await sleep(400);
+      }
+      if (scene.drawer) {
+        await page.evaluate('document.querySelector("#touch .tmenu").dispatchEvent('
+          + 'new TouchEvent("touchstart", { bubbles: true, cancelable: true }))');
+        await sleep(400);
+      }
+
+      // A device-metrics override changes the layout viewport but not the
+      // compositor's surface, and a plain captureScreenshot then tiles the old
+      // surface across the new size — five copies of the same short frame,
+      // which looks like a renderer bug and is a capture bug. An explicit clip
+      // with `captureBeyondViewport` forces a fresh raster at the size asked
+      // for.
+      const shot = await page.send('Page.captureScreenshot', PHONE
+        ? { format: 'png', captureBeyondViewport: true,
+            clip: { x: 0, y: 0, width: 390, height: 844, scale: 1 } }
+        : { format: 'png' });
       const png = path.join(OUT, `${scene.name}.png`);
       fs.writeFileSync(png, Buffer.from(shot.data, 'base64'));
-      results.push({ scene: scene.name, png, probe, image: decodePng(png) });
+      results.push({ scene: scene.name, png, probe, image: decodePng(png), dimmed: !!scene.dimmed });
     }
     page.close();
   } catch (e) {
@@ -297,7 +357,12 @@ function report(results) {
     const img = r.image;
     if (img.colors < 12) failures.push(`${r.scene}: the screenshot has only ${img.colors} distinct colours`);
     if (!contrast(img)) failures.push(`${r.scene}: the screenshot is flat (${img.minLuma}–${img.maxLuma} around ${img.meanLuma})`);
-    if (Math.abs(img.meanLuma - p.meanLuma) > 40) {
+    // The page and the screenshot should agree about how bright the frame is —
+    // unless a panel is deliberately over most of it, in which case they must
+    // not: the canvas is lit and the picture of it is a dark sheet of
+    // parchment. Those framings still have to have colour and contrast, which
+    // is what actually catches a compositor that never got the frame.
+    if (!r.dimmed && Math.abs(img.meanLuma - p.meanLuma) > 40) {
       failures.push(`${r.scene}: page reported mean luma ${p.meanLuma}, the image is ${img.meanLuma}`);
     }
 

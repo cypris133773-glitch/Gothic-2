@@ -592,6 +592,134 @@ async function main() {
     // --- the world keeps time ---------------------------------------------
     ok('the clock is running', /^\d\d:\d\d$/.test(landed.clock), landed.clock);
 
+    // --- the phone ----------------------------------------------------------
+    //
+    // Driven the same way as everything else in this file: real touch events
+    // through the browser's own dispatch, and every assertion read off the
+    // simulation. A touch layer tested by reading back its own state object
+    // would prove only that the object exists.
+    await page.enableTouch();
+
+    // Where the thumbs go, measured rather than assumed. A headless window is
+    // not the size it was asked for — `--window-size=800,600` gives a viewport
+    // of 800×408 — and a check that hard-codes a point outside it reports a
+    // broken control scheme that is in fact perfectly healthy.
+    const [vw, vh] = await page.evaluate('[innerWidth, innerHeight]');
+    const STICK = [Math.round(vw * 0.18), Math.round(vh * 0.80)];   // in the move zone
+    const LOOK = [Math.round(vw * 0.75), Math.round(vh * 0.40)];    // clear of every button
+
+    const centreOf = (sel) => page.evaluate(
+      `(() => { const e = document.querySelector(${JSON.stringify(sel)});`
+      + ' if (!e || e.hidden) return null; const r = e.getBoundingClientRect();'
+      + ' return [r.left + r.width / 2, r.top + r.height / 2]; })()');
+    const tapOn = async (sel, ms = 60) => {
+      const c = await centreOf(sel);
+      if (!c) throw new Error(`nothing to tap at ${sel}`);
+      // A control that has fallen off the bottom of the screen is a real bug,
+      // and it must not read as an inert one: a touch dispatched outside the
+      // viewport lands on nothing and looks exactly like a dead listener.
+      if (c[0] < 0 || c[1] < 0 || c[0] > vw || c[1] > vh) {
+        throw new Error(`${sel} is off the screen at ${c} (viewport ${vw}×${vh})`);
+      }
+      await page.touchStart(c[0], c[1]);
+      await sleep(ms);
+      await page.touchEnd();
+      await sleep(200);
+      return c;
+    };
+
+    ok('the touch controls are not there until somebody touches the glass',
+      await page.evaluate('document.getElementById("touch") === null'));
+
+    // One tap on the right-hand side of the screen — which is what a player's
+    // first contact with this game actually is.
+    await page.tap(LOOK[0], LOOK[1]);
+    await sleep(250);
+    const litUp = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a finger brings them up', !!(litUp.touch && litUp.touch.on));
+    ok('and the page knows it is being held',
+      await page.evaluate('document.body.classList.contains("touch")'));
+
+    // The stick, pushed all the way forward from a stood start — in the same
+    // place and the same direction the keyboard walked a moment ago.
+    const stood = await page.evaluate('window.GRIMWARD.probeState()');
+    await page.touchStart(STICK[0], STICK[1]);
+    await page.touchMove(STICK[0], STICK[1] - 64);      // 64 px up: full deflection
+    await sleep(700);
+    const atRun = await page.evaluate('window.GRIMWARD.probeState()');
+    await sleep(300);
+    await page.touchEnd();
+    await sleep(200);
+    const ranTo = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the stick reads a full push', atRun.touch.mag > 0.95,
+      `mag ${atRun.touch.mag}, stick ${atRun.touch.stick}`);
+    ok('and the man walks where the thumb points',
+      dist2(stood.pos, ranTo.pos) > 1.0, `${dist2(stood.pos, ranTo.pos).toFixed(2)} m`);
+    ok('letting go stops him', ranTo.touch.mag === 0, `mag ${ranTo.touch.mag}`);
+
+    // Half a stick walks. It is the one thing a thumb says that a key cannot,
+    // so it gets an assertion of its own.
+    await page.touchStart(STICK[0], STICK[1]);
+    await page.touchMove(STICK[0], STICK[1] - 32);      // 32 px up: a little over a third
+    await sleep(700);
+    const atWalk = await page.evaluate('window.GRIMWARD.probeState()');
+    await page.touchEnd();
+    await sleep(200);
+    ok('half a stick is a walk and a whole one is a run',
+      atWalk.speed > 0.2 && atWalk.speed < atRun.speed * 0.92,
+      `${atWalk.speed.toFixed(2)} m/s against ${atRun.speed.toFixed(2)}`);
+
+    // Dragging the right of the screen turns him, the way the mouse does.
+    const facingAt = await page.evaluate('window.GRIMWARD.probeState()');
+    const drag = await page.swipe(LOOK, [LOOK[0] + 120, LOOK[1]], { steps: 8, hold: 30 });
+    await drag.release();
+    await sleep(250);
+    const dragged = await page.evaluate('window.GRIMWARD.probeState()');
+    const dyaw = Math.abs(((dragged.yaw - facingAt.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+    ok('dragging the right of the screen turns him', dyaw > 0.15, `${dyaw.toFixed(2)} rad`);
+
+    // A button is a key. Holding "Hit" has to start a swing through the same
+    // path F does, because that is the whole design of the touch layer.
+    const swingsBefore = (await page.evaluate('window.GRIMWARD.probeState()')).combat.swings;
+    const hit = await centreOf('#touch .thands .tbtn');
+    await page.touchStart(hit[0], hit[1]);
+    await sleep(500);
+    await page.touchEnd();
+    await sleep(250);
+    const swung = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('the Hit button swings the sword', swung.combat.swings > swingsBefore,
+      `${swingsBefore} → ${swung.combat.swings}`);
+
+    // Everything used less than once a minute is behind the ☰, and it opens
+    // the same screens the letter keys do.
+    await tapOn('#touch .tmenu');
+    ok('the ☰ opens the rest of the controls',
+      await page.evaluate('!document.querySelector("#touch .tdrawer").hidden'));
+    await tapOn('#touch .tdrawer .tbtn[data-code="KeyN"]');
+    const toMap = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('and one of them is the map', toMap.book === 'map', String(toMap.book));
+    ok('a panel stands the thumb controls down',
+      await page.evaluate('document.getElementById("touch").hidden'));
+
+    // The tabs, the rows and the close cross. Everything the number keys act on
+    // has to be reachable by a finger, or half the game is unplayable on a
+    // phone while looking perfectly healthy on a desk.
+    await tapOn('#book-tabs button[data-tab="pack"]');
+    const inPack = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('tapping a tab switches it', inPack.book === 'pack', String(inPack.book));
+
+    const heldWeapon = inPack.weapon;
+    await tapOn('#book-body li.on[data-act]');
+    const stripped = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('tapping a row does what its number would',
+      stripped.weapon !== heldWeapon, `${heldWeapon} → ${stripped.weapon}`);
+
+    await tapOn('#book .x');
+    const boxShut = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('and the cross closes the panel', boxShut.book === null, String(boxShut.book));
+    ok('which gives the thumb controls back',
+      await page.evaluate('!document.getElementById("touch").hidden'));
+
     // --- nothing broke on the way -----------------------------------------
     const finalErr = await page.evaluate('window.GRIMWARD.error || null');
     ok('no error after a minute of play', !finalErr, finalErr || '');

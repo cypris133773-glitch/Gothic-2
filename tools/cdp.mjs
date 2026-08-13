@@ -173,6 +173,44 @@ export async function connect(wsUrl) {
       await send('Input.dispatchMouseEvent', { type: 'mousePressed', ...base });
       await send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...base });
     },
+
+    /**
+     * A real finger.
+     *
+     * Chromium only delivers TouchEvents to a page it believes is on a
+     * touchscreen, so the emulation has to be switched on before any of this
+     * means anything — without it `dispatchTouchEvent` is accepted, dispatched,
+     * and silently converted to a mouse event, which is exactly the failure
+     * that looks like a broken touch layer.
+     */
+    async enableTouch(maxTouchPoints = 5) {
+      return send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints });
+    },
+    async touchStart(x, y, id = 1) {
+      return send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id }] });
+    },
+    async touchMove(x, y, id = 1) {
+      return send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x, y, id }] });
+    },
+    async touchEnd() {
+      // touchEnd carries no points: the finger that lifted is the one missing.
+      return send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    },
+    /** Put a finger down, drag it in a straight line, lift it. */
+    async swipe(from, to, { steps = 8, hold = 24, id = 1 } = {}) {
+      await this.touchStart(from[0], from[1], id);
+      for (let i = 1; i <= steps; i++) {
+        const t = i / steps;
+        await this.touchMove(from[0] + (to[0] - from[0]) * t, from[1] + (to[1] - from[1]) * t, id);
+        await sleep(hold);
+      }
+      return { release: () => this.touchEnd() };
+    },
+    async tap(x, y, ms = 40) {
+      await this.touchStart(x, y);
+      await sleep(ms);
+      await this.touchEnd();
+    },
   };
 }
 

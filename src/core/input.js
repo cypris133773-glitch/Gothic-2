@@ -10,6 +10,12 @@
 // there is a keyboard turn axis that works without it. And keys are tracked by
 // `code`, not `key`, so a French or German keyboard moves forward with the key
 // in the same place rather than the one with the same letter.
+//
+// The touch layer (src/core/touch.js) presses those same keys, so almost none
+// of it is visible here. The one exception is the movement stick, which is
+// analogue and therefore cannot be a key: it is added to the axes below.
+
+import { createTouch, RUN_AT } from './touch.js';
 
 const DEFAULT_BINDINGS = {
   forward: ['KeyW', 'ArrowUp'],
@@ -35,6 +41,7 @@ export function createInput(canvas, opts = {}) {
   const down = new Set();
   const bindings = { ...DEFAULT_BINDINGS, ...(opts.bindings || {}) };
   const sensitivity = opts.sensitivity || 0.0022;
+  const touch = opts.touch === false ? null : createTouch({ force: !!opts.forceTouch });
   let mouseDX = 0, mouseDY = 0;
   let mouseAttack = false, mouseBlock = false;
   let locked = false;
@@ -86,8 +93,12 @@ export function createInput(canvas, opts = {}) {
     pick: false, steal: false,
   };
 
+  const clamp1 = (v) => Math.max(-1, Math.min(1, v));
+
   return {
     get locked() { return locked; },
+    /** The touch overlay, for the loop that has to stand it down under a panel. */
+    touch,
     /** Drain the accumulated input into an intent for this tick. */
     sample(dt) {
       intent.forward = (held('forward') ? 1 : 0) - (held('back') ? 1 : 0);
@@ -96,11 +107,27 @@ export function createInput(canvas, opts = {}) {
       // Mouse deltas are per-frame quantities, so they are converted to a rate
       // before the simulation sees them — otherwise the same flick turns you
       // further on a slow machine.
-      intent.turn = keyTurn * 2.4 + (dt > 0 ? mouseDX / dt : 0);
-      intent.look = dt > 0 ? -mouseDY / dt : 0;
+      let turnRad = mouseDX, lookRad = mouseDY;
       intent.jump = held('jump');
       intent.sneak = held('sneak');
       intent.run = !held('walk');
+
+      // The stick. Added rather than assigned, so a phone with a keyboard
+      // attached — or a harness driving both — behaves like one device.
+      if (touch && touch.active) {
+        intent.forward = clamp1(intent.forward + touch.z);
+        intent.strafe = clamp1(intent.strafe + touch.x);
+        const look = touch.drainLook();
+        turnRad += look.dx;
+        lookRad += look.dy;
+        // Half a stick walks. This is the one thing a thumb says that a key
+        // cannot, and it is the difference between sneaking up on a man and
+        // sprinting into him.
+        if (touch.mag > 0.01) intent.run = touch.mag > RUN_AT;
+      }
+
+      intent.turn = keyTurn * 2.4 + (dt > 0 ? turnRad / dt : 0);
+      intent.look = dt > 0 ? -lookRad / dt : 0;
       intent.attack = held('attack') || mouseAttack;
       intent.block = held('block') || mouseBlock;
       intent.pick = held('pick');

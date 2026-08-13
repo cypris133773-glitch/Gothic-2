@@ -68,8 +68,13 @@ export async function detect() {
  * benchmark may move it afterwards; the player may override it at any time.
  */
 export function initialTier(caps) {
-  if (caps.touch) return 'low';
   if (!caps.webgl2) return 'low';
+  // A phone is not a weak desktop. The GPU in a current one draws this world
+  // without complaining; what it cannot afford is the *pixels* — a 3× device
+  // ratio on a 900-point screen is four times the fragments a laptop shades.
+  // So a touch device with real cores keeps its textures, and the saving is
+  // taken in the render scale and the shadow pass instead (see main.js).
+  if (caps.touch) return caps.cores >= 6 ? 'medium' : 'low';
   if (caps.webgpu && caps.cores >= 8) return 'high';
   if (caps.cores >= 8) return 'medium';
   return 'low';

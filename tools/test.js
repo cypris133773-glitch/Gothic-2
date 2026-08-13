@@ -1228,6 +1228,57 @@ check('a bandit is a real fight and the curve is where the design says', () => {
   assert(ready.won, `a level-${ready.level} character could not clear the lighthouse — it is a wall`);
 });
 
+// --- trading ------------------------------------------------------------------
+
+check('a shop is one call, and it knows what he can afford', () => {
+  // Trading was reachable from a conversation and had no screen, so buying
+  // anything in a browser was impossible. `shop()` is what a screen needs, in
+  // one call, so the UI never reaches into a trader's internals.
+  const w = createWorld({ seed: 1, props: 0, beasts: 0, foes: false });
+  eq(w.shop(), null, 'a shop appeared with nobody selling');
+
+  w.openTrader = 'harl_smith';
+  const s = w.shop();
+  assert(s && s.stock.length > 0, 'the smith has nothing on the rack');
+  eq(s.purse, w.character.gold, 'the shop disagrees about the purse');
+
+  // Affordability is on the row, because "you cannot have that" belongs next to
+  // the thing rather than in a message after you press the key.
+  const dear = s.stock.find((it) => it.price > s.purse);
+  const cheap = s.stock.find((it) => it.price <= s.purse);
+  if (dear) assert(!dear.afford, `${dear.name} at ${dear.price} looked affordable on ${s.purse}`);
+  assert(cheap && cheap.afford, 'nothing in the shop is within reach of a starting purse');
+
+  const before = w.character.gold;
+  assert(w.buy(cheap.id).ok, 'the purchase was refused');
+  eq(w.character.gold, before - cheap.price, 'the price was wrong');
+  assert(w.carrying(cheap.id), 'it was paid for and not handed over');
+  if (dear) assert(!w.buy(dear.id).ok, 'he sold something nobody could pay for');
+});
+
+check('a smith buys metal and a hunter buys hides', () => {
+  // A trader who buys everything is a wallet with a face. `shop().mine` is
+  // filtered to what this particular man deals in, which is the whole reason
+  // the economy has more than one person in it.
+  const w = createWorld({ seed: 1, props: 0, beasts: 0, foes: false });
+  w.give('wolf_pelt', 2); w.give('rusty_blade');
+
+  w.openTrader = 'harl_smith';
+  const smith = w.shop().mine.map((i) => i.id);
+  assert(smith.includes('rusty_blade'), 'the smith will not look at a sword');
+  assert(!smith.includes('wolf_pelt'), 'the smith is buying pelts');
+
+  w.openTrader = 'bosk_hunter';
+  const hunter = w.shop().mine.map((i) => i.id);
+  assert(hunter.includes('wolf_pelt'), 'the hunter will not buy a pelt');
+  assert(!hunter.includes('rusty_blade'), 'the hunter is buying swords');
+
+  // And a quest item is nobody's business.
+  w.give('sealed_letter');
+  w.openTrader = 'harl_smith';
+  assert(!w.shop().mine.some((i) => i.id === 'sealed_letter'), 'somebody offered to buy the letter');
+});
+
 // --- the map ------------------------------------------------------------------
 
 check('the map is drawn from the world, and shows only what you have found', () => {

@@ -186,6 +186,7 @@ async function boot() {
       items: world.items().map((i) => `${i.id}×${i.n}${i.equipped ? '*' : ''}`),
       weapon: world.inventory.weapon, armour: world.inventory.armour,
       book: tab,
+      shop: world.shop(),
       seen: [...world.seen],
       mana: world.caster.mana, manaMax: world.caster.max,
       bow: world.bow(),
@@ -301,6 +302,47 @@ async function boot() {
       .map(([name, p]) => ({ name, d: Math.hypot(p.at[0] - hx, p.at[1] - hz) }))
       .sort((a, b) => a.d - b.d)[0];
     diedWhere.textContent = `You would wake near ${near ? near.name.replace(/_/g, ' ') : 'the road'}.`;
+  }
+
+  // --- the shop -----------------------------------------------------------------
+  const shopEl = document.getElementById('shop');
+  const shopWho = document.getElementById('shop-who');
+  const shopStock = document.getElementById('shop-stock');
+  const shopMine = document.getElementById('shop-mine');
+  /** What the number keys buy and sell right now. */
+  let buying = [], selling = [];
+
+  function renderShop() {
+    const s = world.shop();
+    if (!s) { shopEl.hidden = true; buying = []; selling = []; return; }
+    shopEl.hidden = false;
+    shopWho.textContent = `${s.id.replace(/_/g, ' ')}  ·  you have ${s.purse} coin  ·  he has ${s.gold}`;
+
+    buying = s.stock.slice(0, 9);
+    selling = s.mine.slice(0, 9);
+
+    const row = (i, name, note, off) => {
+      const li = document.createElement('li');
+      if (off) li.className = 'off';
+      const k = document.createElement('span'); k.className = 'k'; k.textContent = i;
+      const n = document.createElement('span'); n.className = 'n'; n.textContent = name;
+      const m2 = document.createElement('span'); m2.className = 'm'; m2.textContent = note;
+      li.append(k, n, m2);
+      return li;
+    };
+    const empty = (text) => {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.textContent = text;
+      return li;
+    };
+
+    shopStock.replaceChildren(...(buying.length
+      ? buying.map((it, i) => row(`${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.afford))
+      : [empty('His rack is bare.')]));
+    shopMine.replaceChildren(...(selling.length
+      ? selling.map((it, i) => row(`⇧${i + 1}`, `${it.name}${it.n > 1 ? ` ×${it.n}` : ''}`, `${it.price}g`, !it.wanted))
+      : [empty('Nothing here he deals in.')]));
   }
 
   const talkEl = document.getElementById('talk');
@@ -612,11 +654,31 @@ async function boot() {
       return;
     }
 
+    // The shop takes the keyboard while it is open, including from the
+    // conversation that opened it.
+    if (world.openTrader) {
+      if (e.code === 'Escape') { world.openTrader = null; renderShop(); renderTalk(); return; }
+      // Read from `e.code`, not `e.key`. Shift+1 is "!" on most layouts and
+      // "1" on almost none, so a shop keyed off `e.key` sells nothing to
+      // anybody outside the country its author lives in.
+      const m2 = /^Digit([1-9])$/.exec(e.code);
+      if (m2) {
+        const n = Number(m2[1]);
+        const it = e.shiftKey ? selling[n - 1] : buying[n - 1];
+        if (it) {
+          const r = e.shiftKey ? world.sell(it.id) : world.buy(it.id);
+          if (!r.ok) log(r.why);
+        }
+        renderShop();
+      }
+      return;
+    }
+
     if (world.dialogue.isOpen) {
       if (e.code === 'Escape') { world.dialogue.close(); renderTalk(); return; }
       if (e.code === 'KeyT') { const r = world.train(); log(r.ok ? `learned: ${r.value ?? 'yes'}` : r.why); renderTalk(); return; }
       const n = Number(e.key);
-      if (n >= 1 && n <= 9) { world.dialogue.say(n - 1); renderTalk(); }
+      if (n >= 1 && n <= 9) { world.dialogue.say(n - 1); renderTalk(); renderShop(); }
       return;
     }
     // E opens a conversation with whoever is in front of you. Nothing happens
@@ -752,6 +814,10 @@ async function boot() {
     // compared `world.dead === !diedEl.hidden`, which is true exactly when they
     // *already* agree — so the death screen never appeared.
     if (diedEl.hidden !== !world.dead) renderDied();
+    // The shop reconciles the same way. Anything that sets `openTrader` — a
+    // conversation, a debug call, a future vendor that opens on approach — gets
+    // a screen, rather than only the one path that remembered to ask for one.
+    if (shopEl.hidden !== !world.openTrader) renderShop();
 
     // Standing in an exit takes you through it. There is no prompt: the
     // barricade at the mouth of the pass is visible from a hundred metres and
@@ -824,6 +890,7 @@ async function boot() {
   // their own temporal dead zone, which is a good reason to call them late.
   api.leaveTitle = leaveTitle;
   renderTitle();
+  renderShop();
   requestAnimationFrame(frame);
 }
 

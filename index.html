@@ -64,6 +64,19 @@
   <p id="talk-hint">1–9 to speak · T to train · Esc to end</p>
 </div>
 
+<!-- The shop. It opens itself when a conversation offers to trade, because
+     "he will sell you things" and "here is what he has" are the same sentence
+     and making the player press a second key to hear the end of it is the sort
+     of thing nobody notices until they have done it two hundred times. -->
+<div id="shop" hidden>
+  <p id="shop-who"></p>
+  <div id="shop-cols">
+    <div><h4>He is selling</h4><ul id="shop-stock"></ul></div>
+    <div><h4>He will buy</h4><ul id="shop-mine"></ul></div>
+  </div>
+  <p id="shop-hint">1–9 buy · Shift 1–9 sell · Esc done</p>
+</div>
+
 <!-- The character's own screens: what he is carrying, what he has been asked to
      do, and what he has spent his learning points on. One panel, three tabs,
      because they are read together — "can I afford that sword yet" is a

@@ -45,7 +45,7 @@ import { DIALOGUE, SPEAKERS } from '../data/dialogue.js';
 import { snapshot, restore } from '../core/save.js';
 import {
   createInventory, add, remove, has, count, equip, unequip, drink, applyLoadout,
-  createTrader, buy, sell, listing,
+  createTrader, buy, sell, listing, buyPrice, sellPrice,
 } from '../game/inventory.js';
 import { DROPS, ITEMS, item } from '../data/items.js';
 import { QUESTS, entry as questEntry } from '../data/quests.js';
@@ -1312,6 +1312,28 @@ export function createWorld(opts = {}) {
     },
 
     /** Trader purses and stock, for the save file. */
+    /**
+     * What the man in front of you is selling, and what he will take.
+     *
+     * One call rather than three, because a shop screen needs all of it at once
+     * and the alternative is the UI reaching into the trader's internals.
+     */
+    shop() {
+      if (!world.openTrader) return null;
+      const t = world.trader(world.openTrader);
+      const stock = [...t.stock.entries()]
+        .filter(([, n]) => n > 0)
+        .map(([id, n]) => ({
+          id, n, name: ITEMS[id].name, price: buyPrice(ITEMS[id]),
+          afford: character.gold >= buyPrice(ITEMS[id]),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const mine = listing(inventory)
+        .filter((it) => !ITEMS[it.id].unsellable && (t.buys || []).includes(it.kind))
+        .map((it) => ({ ...it, price: sellPrice(ITEMS[it.id]), wanted: t.gold >= sellPrice(ITEMS[it.id]) }));
+      return { id: world.openTrader, gold: t.gold, purse: character.gold, stock, mine };
+    },
+
     traderState() {
       return [...traders.entries()].map(([id, t]) => [id, t.gold, [...t.stock.entries()]]);
     },

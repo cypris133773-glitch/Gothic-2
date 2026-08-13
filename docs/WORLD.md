@@ -192,6 +192,25 @@ Those numbers are measured, not asserted: the test suite runs the same spacing
 bot the wood is measured with and pins the assertion at ten, because a test
 pinned to a coin flip fails on Tuesdays.
 
+## Trading
+
+Traders, prices and purses have existed since the inventory landed, and there
+was no screen — so buying anything in a browser was impossible. There is one
+now, and it opens itself when a conversation offers to trade, because "he will
+sell you things" and "here is what he has" are the same sentence.
+
+Two rules it makes visible:
+
+- **A trader who buys everything is a wallet with a face.** A smith takes metal
+  and leather; a hunter takes pelts and tusks and nothing with a curse on it.
+  What he will buy is filtered per man, so the economy has more than one person
+  in it.
+- **"You cannot afford that" belongs next to the thing**, not in a message
+  after you press the key. Affordability is on the row.
+
+His purse runs out too, and he restocks on a chapter boundary rather than on a
+timer.
+
 ## The map
 
 Drawn as SVG from the region's own `places` and `roads` — the same data the

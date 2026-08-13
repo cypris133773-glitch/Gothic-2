@@ -345,6 +345,44 @@ async function main() {
     // The gate of the upper quarter is shut, and it is shut with geometry.
     ok('the upper gate starts closed', bookShut.doors.upper === false);
 
+    // --- the shop -----------------------------------------------------------
+    // Trading was reachable from a conversation and had no screen at all, so
+    // buying anything in a browser was impossible. This is the real path: open
+    // it the way dialogue does, then press a number.
+    await page.evaluate(`(() => {
+      const w = window.GRIMWARD.world;
+      w.character.gold = 500;
+      w.openTrader = 'harl_smith';
+    })()`);
+    await sleep(200);
+    const shopping = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('a shop opens', !!shopping.shop, shopping.shop ? shopping.shop.id : 'none');
+    ok('with something on the rack', shopping.shop.stock.length > 0,
+      `${shopping.shop.stock.length} lines`);
+    ok('and the screen is up', await page.evaluate('!document.getElementById("shop").hidden'));
+
+    // Buy the first line he can *afford*, not the first line: a five-hundred
+    // coin purse and a seven-hundred-and-eighty coin crossbow is a correct
+    // refusal, and a test that reads it as a failure is testing the wrong
+    // thing.
+    const purseBefore = shopping.shop.purse;
+    const slot = shopping.shop.stock.findIndex((it) => it.afford);
+    ok('he has something in the purse\'s reach', slot >= 0,
+      shopping.shop.stock.map((it) => `${it.name} ${it.price}g`).join(', '));
+    const onRack = shopping.shop.stock[slot];
+    await page.keyDown(`Digit${slot + 1}`); await page.keyUp(`Digit${slot + 1}`);
+    await sleep(200);
+    const bought = await page.evaluate('window.GRIMWARD.probeState()');
+    ok('1 buys the first thing on it', bought.shop.purse === purseBefore - onRack.price,
+      `${purseBefore} → ${bought.shop.purse} for ${onRack.name} at ${onRack.price}`);
+    ok('and it is in the pack', bought.items.some((i) => i.startsWith(onRack.id)),
+      bought.items.join(' '));
+
+    await page.keyDown('Escape'); await page.keyUp('Escape');
+    await sleep(150);
+    ok('Escape closes the shop', !(await page.evaluate('window.GRIMWARD.probeState()')).shop);
+    ok('no error from trading', !(await page.evaluate('window.GRIMWARD.error || null')));
+
     // --- the map ------------------------------------------------------------
     await page.keyDown('KeyN'); await page.keyUp('KeyN');
     await sleep(200);

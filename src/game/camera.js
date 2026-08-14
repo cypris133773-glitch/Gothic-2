@@ -10,6 +10,28 @@ const MAX_DIST = 5.4;
 const HEAD = 1.55;              // eye height above the character's feet
 const SHOULDER = 0.55;          // over-the-shoulder offset, right of centre
 
+/**
+ * The camera's own right, in world space.
+ *
+ * This is the same vector `lookAt` builds (`up × (eye − target)`, normalised),
+ * so "right" here means right *on the screen* rather than right in some other
+ * frame of reference. It is exported because the input layer needs it: the
+ * world's yaw runs the other way round from the view's, and the one honest
+ * place to say so is the vector the renderer actually uses.
+ */
+export function cameraRight(cam, out = [0, 0, 0]) {
+  const zx = cam.pos[0] - cam.target[0];
+  const zz = cam.pos[2] - cam.target[2];
+  const zy = cam.pos[1] - cam.target[1];
+  const len = Math.hypot(zx, zy, zz) || 1;
+  // up × z, with up = (0, 1, 0). The y term falls out, which is what makes this
+  // usable as a flat steering basis as well as a view basis.
+  const rx = zz / len, rz = -zx / len;
+  const rl = Math.hypot(rx, rz) || 1;
+  out[0] = rx / rl; out[1] = 0; out[2] = rz / rl;
+  return out;
+}
+
 export function createCamera() {
   return {
     pos: new Float32Array([0, 2, 6]),

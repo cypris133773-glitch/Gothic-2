@@ -109,6 +109,17 @@ character walks, stops, turns without pointer lock, strafes without turning,
 sneaks slower than it runs, jumps and lands, and the camera stays behind it and
 out of the hillside.
 
+It also asserts which *way* those things go, which it did not always do. The
+turn check was `Math.abs(yaw1 - yaw0) > 0.5` — a test that a turn happened, not
+that it went where it was asked — and under it the right arrow turned the camera
+left and D strafed left for months, green every run. The world's yaw is
+`atan2(dx, dz)` and forward is `(sin yaw, cos yaw)`, so a man at yaw 0 faces +Z
+and a right-handed view standing behind him has **screen right at −X**; the
+mapping from a device delta to a world intent therefore needs a minus sign on
+both horizontal axes, and it is the input layer's job to carry it. The checks now
+measure against `cameraRight` — the same vector the renderer builds in
+`lookAt` — so nothing can agree with itself into being wrong again.
+
 ## On a phone
 
 The game is playable with two thumbs, and it got there by one decision rather

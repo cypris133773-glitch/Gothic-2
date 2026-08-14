@@ -11,6 +11,7 @@ import { createInput, idleIntent } from './core/input.js';
 import { createWorld, travel } from './world/world.js';
 import { createOverlay, FrameTimer, log } from './core/log.js';
 import { STATE_NAME } from './game/combat.js';
+import { cameraRight } from './game/camera.js';
 import { createStorage } from './core/save.js';
 import { SKILLS, xpToNext, lpForAttribute } from './game/character.js';
 import { CHAPTERS } from './game/chapters.js';
@@ -170,6 +171,10 @@ async function boot() {
       yaw: world.player.yaw, speed: world.player.speed,
       onGround: world.player.onGround, sneaking: world.player.sneaking,
       camera: [...world.camera.pos], camDist: world.camera.dist,
+      // The camera's own right, the same vector the renderer builds in
+      // `lookAt`. The browser checks steer by it, so "turned right" means
+      // right *on the screen* rather than right in some other frame.
+      camRight: cameraRight(world.camera),
       combat: {
         state: world.player.fighter.state, t: world.player.fighter.t,
         hp: world.player.fighter.hp, swings: world.player.fighter.swings,

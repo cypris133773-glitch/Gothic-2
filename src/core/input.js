@@ -102,7 +102,10 @@ export function createInput(canvas, opts = {}) {
     /** Drain the accumulated input into an intent for this tick. */
     sample(dt) {
       intent.forward = (held('forward') ? 1 : 0) - (held('back') ? 1 : 0);
-      intent.strafe = (held('right') ? 1 : 0) - (held('left') ? 1 : 0);
+      // Both horizontal axes are gathered as "towards the right of the screen"
+      // and mirrored once, at the bottom. See the note there: it is the whole
+      // reason this layer exists.
+      let strafeRight = (held('right') ? 1 : 0) - (held('left') ? 1 : 0);
       const keyTurn = (held('turnRight') ? 1 : 0) - (held('turnLeft') ? 1 : 0);
       // Mouse deltas are per-frame quantities, so they are converted to a rate
       // before the simulation sees them — otherwise the same flick turns you
@@ -116,7 +119,7 @@ export function createInput(canvas, opts = {}) {
       // attached — or a harness driving both — behaves like one device.
       if (touch && touch.active) {
         intent.forward = clamp1(intent.forward + touch.z);
-        intent.strafe = clamp1(intent.strafe + touch.x);
+        strafeRight = clamp1(strafeRight + touch.x);
         const look = touch.drainLook();
         turnRad += look.dx;
         lookRad += look.dy;
@@ -126,7 +129,25 @@ export function createInput(canvas, opts = {}) {
         if (touch.mag > 0.01) intent.run = touch.mag > RUN_AT;
       }
 
-      intent.turn = keyTurn * 2.4 + (dt > 0 ? turnRad / dt : 0);
+      // **Screen right is not +X.**
+      //
+      // The world's yaw is `atan2(dx, dz)` and forward is `(sin yaw, cos yaw)`,
+      // so a man at yaw 0 faces +Z. The camera stands behind him and, in a
+      // right-handed view that looks down its own −Z, that puts screen right at
+      // **−X** — which makes a *rising* yaw a turn to the *left*. Every other
+      // part of the game is consistent about that: the buildings, the NPCs'
+      // facing, the bots' steering, `cameraRight` in src/game/camera.js. The one
+      // place the two frames have to be reconciled is here, where a device delta
+      // in screen space becomes an intent in world space, because that is this
+      // layer's entire job.
+      //
+      // Without these two minus signs the mouse turned the camera the wrong way
+      // and D strafed left, and neither browser check caught it for months: both
+      // asked `Math.abs(yaw1 - yaw0) > 0.5`, which tests that a turn happened
+      // and not that it went where it was asked. They now assert the direction
+      // against the camera's own right vector.
+      intent.strafe = -strafeRight;
+      intent.turn = -(keyTurn * 2.4 + (dt > 0 ? turnRad / dt : 0));
       intent.look = dt > 0 ? -lookRad / dt : 0;
       intent.attack = held('attack') || mouseAttack;
       intent.block = held('block') || mouseBlock;

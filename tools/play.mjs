@@ -169,17 +169,32 @@ async function main() {
     // Arrow keys, not the mouse: pointer lock can be refused, and a game whose
     // camera only works under pointer lock is a game that does not work in an
     // iframe, a kiosk, or half of Safari.
-    const yaw0 = (await page.evaluate('window.GRIMWARD.probeState()')).yaw;
+    //
+    // And the assertion is about *direction*, not magnitude. `Math.abs(yaw1 -
+    // yaw0) > 0.5` was the check here for months: it proves a turn happened and
+    // says nothing about whether it went where it was asked, so the right arrow
+    // turned the camera left the whole time and every run was green. The ground
+    // truth is the camera's own right vector — the same one `lookAt` builds.
+    const t0turn = await page.evaluate('window.GRIMWARD.probeState()');
     await page.hold('ArrowRight', 600);
-    const yaw1 = (await page.evaluate('window.GRIMWARD.probeState()')).yaw;
-    const turned = Math.abs(Math.atan2(Math.sin(yaw1 - yaw0), Math.cos(yaw1 - yaw0)));
+    const t1turn = await page.evaluate('window.GRIMWARD.probeState()');
+    const turned = Math.abs(Math.atan2(Math.sin(t1turn.yaw - t0turn.yaw), Math.cos(t1turn.yaw - t0turn.yaw)));
     ok('the character turns without pointer lock', turned > 0.5, `${turned.toFixed(2)} rad`);
+    // How far the new facing leans towards where the screen's right was.
+    const leaned = Math.sin(t1turn.yaw) * t0turn.camRight[0] + Math.cos(t1turn.yaw) * t0turn.camRight[2];
+    ok('and the right arrow turns him to the right of the screen', leaned > 0.2,
+      `${leaned.toFixed(2)} towards screen right`);
 
     // --- strafing is not a second forward ---------------------------------
     const s0 = await page.evaluate('window.GRIMWARD.probeState()');
     await page.hold('KeyD', 700);
     const s1 = await page.evaluate('window.GRIMWARD.probeState()');
     ok('strafing moves the character', dist2(s0.pos, s1.pos) > 1.2, `${dist2(s0.pos, s1.pos).toFixed(2)} m`);
+    // Same rule as the turn: which way, not how far.
+    const stepped = ((s1.pos[0] - s0.pos[0]) * s0.camRight[0] + (s1.pos[2] - s0.pos[2]) * s0.camRight[2])
+      / (dist2(s0.pos, s1.pos) || 1);
+    ok('and D steps to the right of the screen', stepped > 0.85,
+      `${stepped.toFixed(2)} of the step went right`);
     ok('strafing does not turn the character',
       Math.abs(Math.atan2(Math.sin(s1.yaw - s0.yaw), Math.cos(s1.yaw - s0.yaw))) < 0.05);
 
@@ -677,6 +692,9 @@ async function main() {
     const dragged = await page.evaluate('window.GRIMWARD.probeState()');
     const dyaw = Math.abs(((dragged.yaw - facingAt.yaw + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
     ok('dragging the right of the screen turns him', dyaw > 0.15, `${dyaw.toFixed(2)} rad`);
+    const thumbLean = Math.sin(dragged.yaw) * facingAt.camRight[0] + Math.cos(dragged.yaw) * facingAt.camRight[2];
+    ok('and a thumb dragged right turns him right', thumbLean > 0.1,
+      `${thumbLean.toFixed(2)} towards screen right`);
 
     // A button is a key. Holding "Hit" has to start a swing through the same
     // path F does, because that is the whole design of the touch layer.

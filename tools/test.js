@@ -19,6 +19,7 @@ import { createWorld, travel, CHUNK, LOD_RES, RADIUS } from '../src/world/world.
 import { REGIONS } from '../src/world/regions.js';
 import { idleIntent } from '../src/core/input.js';
 import { RUN_SPEED, resolveObstacles } from '../src/game/player.js';
+import { cameraRight } from '../src/game/camera.js';
 import { KITS, poseHumanoid, kitForArmour } from '../src/game/rig.js';
 import { postAt, DAYS, stepRoutine } from '../src/game/routine.js';
 import {
@@ -375,6 +376,50 @@ check('walking forward moves the character, and stopping stops it', () => {
   assert(dist < RUN_SPEED * 1.05, `one second of running covered ${dist.toFixed(2)} m, faster than the top speed`);
   for (let i = 0; i < 30; i++) w.tick(1 / 60, idleIntent());
   assert(w.player.speed < 0.05, `the character is still moving at ${w.player.speed.toFixed(2)} m/s`);
+});
+
+// --- which way is right? ------------------------------------------------------
+//
+// The world's yaw is `atan2(dx, dz)` and forward is `(sin yaw, cos yaw)`, so a
+// man at yaw 0 faces +Z — and a right-handed view standing behind him therefore
+// has **screen right at −X**. That means a rising yaw is a turn to the *left*,
+// and both of these checks exist because nothing said so out loud for months:
+// the browser harness asked `Math.abs(yaw1 - yaw0) > 0.5`, which proves a turn
+// happened and not that it went where it was asked, so the mouse turned the
+// camera the wrong way and D strafed left.
+//
+// The ground truth here is `cameraRight`, which is the same vector the renderer
+// builds in `lookAt`. Nothing else would do: a test that asserts a sign against
+// a number written down in the test is a test that agrees with whatever the
+// code did on the day it was written.
+
+check('a negative turn is a turn to the right of the screen', () => {
+  const w = createWorld({ seed: 3, props: 0 });
+  w.player.yaw = 0;
+  w.tick(1 / 60, idleIntent());
+  const right = cameraRight(w.camera);
+  const before = [Math.sin(w.player.yaw), Math.cos(w.player.yaw)];
+  assert(Math.abs(before[0] * right[0] + before[1] * right[2]) < 1e-6,
+    'the camera is not behind the character to begin with');
+  for (let i = 0; i < 30; i++) w.tick(1 / 60, { ...idleIntent(), turn: -1.5 });
+  const after = [Math.sin(w.player.yaw), Math.cos(w.player.yaw)];
+  const swung = after[0] * right[0] + after[1] * right[2];
+  assert(swung > 0.2,
+    `half a second of turn:-1.5 swung the character ${swung.toFixed(2)} towards the screen's right`);
+});
+
+check('a negative strafe steps to the right of the screen', () => {
+  const w = createWorld({ seed: 3, props: 0 });
+  w.player.yaw = 0;
+  w.tick(1 / 60, idleIntent());
+  const right = cameraRight(w.camera);
+  const from = [...w.player.pos];
+  for (let i = 0; i < 30; i++) w.tick(1 / 60, { ...idleIntent(), strafe: -1, run: true });
+  const dx = w.player.pos[0] - from[0], dz = w.player.pos[2] - from[2];
+  const moved = Math.hypot(dx, dz);
+  assert(moved > 0.5, `half a second of strafing covered ${moved.toFixed(2)} m`);
+  const along = (dx * right[0] + dz * right[2]) / moved;
+  assert(along > 0.9, `the step went ${along.toFixed(2)} of the way towards the screen's right`);
 });
 
 check('a body has mass — it does not reach top speed instantly', () => {
